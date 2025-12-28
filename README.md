@@ -39,6 +39,29 @@ Outputs land in `artifacts/<run-id>/`, including `clean.csv`, `schema_spec.json`
 - Writes reproducible artifacts (schema, evidence packet, shadow log, clean CSV) under `artifacts/`.
 - Designed to plug in alternative UIs without changing the core runtime in `runtime/`.
 
+## How it works (fast walk-through)
+
+```
+Your CSV/XLSX
+   │
+   ▼
+runtime.excel_flow.puhemies_run_from_file
+   ├─ Detect header candidates → evidence_packet.json
+   ├─ If ambiguous → header_spec.json → CLI/TUI/Streamlit asks you
+   ├─ You confirm → human_confirmation.json
+   ├─ Orchestrator resumes → cleans/normalizes data
+   └─ Writes outputs:
+        • clean.csv
+        • schema_spec.json (normalized headers/field types)
+        • shadow.jsonl (trace log)
+```
+
+Why this is more than “just read Excel”:
+- The pipeline treats header detection as a first-class decision, not a guess hidden inside a parser.
+- Human confirmations are recorded, so runs are reproducible and auditable.
+- UIs are thin shells; the orchestration and janitor live in `runtime/`, so you can swap interfaces without touching the core.
+- Artifacts are structured (JSON + CSV) for downstream pipelines, not screenshots or ad-hoc prints.
+
 ## Agent philosophy (why it works this way)
 
 - Decisions are explicit: the orchestrator asks for human confirmation when header confidence is low, then records that choice in artifacts so runs are reproducible.
