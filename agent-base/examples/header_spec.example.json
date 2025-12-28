@@ -1,0 +1,18 @@
+{
+  "run_id": "run_2025_01_15_demo",
+  "artifact_key": "artifacts/run_2025_01_15_demo/header_spec@def456",
+  "selected_candidate_id": "c1",
+  "candidates": [
+    {
+      "candidate_id": "c1",
+      "header_rows": [1],
+      "merge_strategy": "none",
+      "normalized_headers": ["month", "product_code", "quantity"],
+      "confidence": 0.92,
+      "evidence_keys": ["artifacts/run_2025_01_15_demo/header_candidate@abc123"]
+    }
+  ],
+  "needs_human_confirmation": false,
+  "alternatives": [],
+  "notes": "Single clear header row."
+}

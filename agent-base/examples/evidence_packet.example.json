@@ -1,0 +1,23 @@
+{
+  "run_id": "run_2025_01_15_demo",
+  "source": {
+    "file_path": "./samples/report.xlsx",
+    "sheets": ["Summary", "Sales"]
+  },
+  "preview": {
+    "sheet": "Sales",
+    "rows": [
+      ["Month", "Product Code", "Quantity"],
+      ["2024-12", "SKU-001", 120],
+      ["2024-12", "SKU-002", 75]
+    ]
+  },
+  "header_candidates": [
+    {
+      "candidate_id": "c1",
+      "header_row": 1,
+      "normalized_headers": ["month", "product_code", "quantity"],
+      "evidence_key": "artifacts/run_2025_01_15_demo/header_candidate@abc123"
+    }
+  ]
+}
