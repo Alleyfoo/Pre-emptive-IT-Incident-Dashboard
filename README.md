@@ -39,6 +39,13 @@ Outputs land in `artifacts/<run-id>/`, including `clean.csv`, `schema_spec.json`
 - Writes reproducible artifacts (schema, evidence packet, shadow log, clean CSV) under `artifacts/`.
 - Designed to plug in alternative UIs without changing the core runtime in `runtime/`.
 
+## Agent philosophy (why it works this way)
+
+- Decisions are explicit: the orchestrator asks for human confirmation when header confidence is low, then records that choice in artifacts so runs are reproducible.
+- Separation of concerns: runtime logic lives in `runtime/` (detection, cleaning, orchestration) while UIs (CLI/TUI/Streamlit) are thin shells that just prompt and display.
+- Traceability by default: every step writes to `shadow.jsonl` and structured specs so you can audit or replay without hidden state.
+- Extensible roles: canonical agent/skill definitions live under `agent-base/` (mirrored in `.github/`) if you want to plug this into a larger multi-agent workflow.
+
 ## Repo layout
 
 - `data_agents_cli.py` / `data-agents.ps1` — CLI entrypoint and PowerShell wrapper.
