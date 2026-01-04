@@ -1,11 +1,16 @@
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime
 from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+
+from runtime.artifact_store import build_artifact_store
+from runtime.excel_flow import puhemies_continue, puhemies_run_from_file
+from simple_schema_builder import render_schema_builder
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEMOS_ROOT = os.path.join(REPO_ROOT, "demos")
@@ -14,12 +19,13 @@ if REPO_ROOT not in sys.path:
 if DEMOS_ROOT not in sys.path:
     sys.path.insert(0, DEMOS_ROOT)
 
-from simple_schema_builder import render_schema_builder
-from runtime.excel_flow import puhemies_continue, puhemies_run_from_file
-
 
 def artifacts_root() -> str:
-    return os.path.join(REPO_ROOT, "artifacts")
+    return os.environ.get("ARTIFACTS_ROOT") or os.path.join(REPO_ROOT, "artifacts")
+
+
+def artifact_store():
+    return build_artifact_store(artifacts_root())
 
 
 def uploads_dir() -> str:
@@ -28,42 +34,65 @@ def uploads_dir() -> str:
     return path
 
 
-def load_json(path: str) -> Dict:
-    if not os.path.exists(path):
+def load_json_from_store(store, key: str) -> Dict:
+    if not store.exists(key):
         return {}
-    with open(path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
+    return json.loads(store.read_text(key))
 
 
-def list_runs() -> List[str]:
-    root = artifacts_root()
-    if not os.path.exists(root):
-        return []
-    return sorted([name for name in os.listdir(root) if os.path.isdir(os.path.join(root, name))], reverse=True)
+def list_runs(store) -> List[str]:
+    run_ids = set()
+    for key in store.list(""):
+        parts = key.split("/")
+        if parts and parts[0]:
+            run_ids.add(parts[0])
+    return sorted(run_ids, reverse=True)
 
 
-def load_shadow_status(run_id: str) -> str:
-    run_dir = os.path.join(artifacts_root(), run_id)
-    shadow_path = os.path.join(run_dir, "shadow.jsonl")
-    if not os.path.exists(shadow_path):
-        if os.path.exists(os.path.join(run_dir, "save_manifest.json")):
+def load_shadow_status(store, run_id: str) -> str:
+    shadow_key = f"{run_id}/shadow.jsonl"
+    manifest_key = f"{run_id}/save_manifest.json"
+    if not store.exists(shadow_key):
+        if store.exists(manifest_key):
             return "ok"
         return "new"
     last_event = None
-    with open(shadow_path, "r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.strip():
-                last_event = json.loads(line).get("event")
+    content = store.read_text(shadow_key).splitlines()
+    for line in content:
+        if line.strip():
+            last_event = json.loads(line).get("event")
     if last_event in ["stop_due_to_ambiguous_headers", "resume_guard_file_changed"]:
         return "needs_confirmation"
-    if os.path.exists(os.path.join(run_dir, "save_manifest.json")):
+    if store.exists(manifest_key):
         return "ok"
     return last_event or "unknown"
 
 
-def load_dataframe_for_run(evidence: Dict[str, object]) -> Optional[pd.DataFrame]:
-    file_path = evidence.get("file_path")
-    if not file_path or not os.path.exists(file_path):
+def _materialize_input(store, run_id: str, evidence: Dict[str, object]) -> Optional[str]:
+    artifact_key = evidence.get("input_artifact_key")
+    source_uri = evidence.get("source_uri")
+    cache_dir = os.path.join(tempfile.gettempdir(), "data-agents-dashboard", run_id)
+    if artifact_key:
+        store_key = artifact_key.split("artifacts/", 1)[1] if artifact_key.startswith("artifacts/") else artifact_key
+        if store.exists(store_key):
+            os.makedirs(cache_dir, exist_ok=True)
+            filename = os.path.basename(store_key) or "input"
+            local_path = os.path.join(cache_dir, filename)
+            with open(local_path, "wb") as handle:
+                handle.write(store.read_bytes(store_key))
+            return local_path
+    if source_uri and source_uri.startswith("file://"):
+        path = source_uri[len("file://") :]
+        if os.path.exists(path):
+            return path
+    if source_uri and os.path.isabs(source_uri) and os.path.exists(source_uri):
+        return source_uri
+    return None
+
+
+def load_dataframe_for_run(store, run_id: str, evidence: Dict[str, object]) -> Optional[pd.DataFrame]:
+    file_path = _materialize_input(store, run_id, evidence)
+    if not file_path:
         return None
     ext = os.path.splitext(file_path)[1].lower()
     if ext in [".xlsx", ".xls"]:
@@ -73,11 +102,12 @@ def load_dataframe_for_run(evidence: Dict[str, object]) -> Optional[pd.DataFrame
     return None
 
 
-def count_rows(csv_path: str) -> int:
-    if not os.path.exists(csv_path):
+def count_rows(store, key: str) -> int:
+    if not store.exists(key):
         return 0
-    with open(csv_path, "r", encoding="utf-8") as handle:
-        return max(0, sum(1 for _ in handle) - 1)
+    text = store.read_text(key)
+    lines = text.splitlines()
+    return max(0, len(lines) - 1)
 
 
 st.set_page_config(page_title="Puhemies Dashboard", page_icon="D", layout="wide")
@@ -89,23 +119,22 @@ if "selected_run" not in st.session_state:
 if "response" not in st.session_state:
     st.session_state.response = None
 
+store = artifact_store()
 tabs = st.tabs(["Runs", "Run Details"])
 
 with tabs[0]:
     st.subheader("Runs")
-    runs = list_runs()
+    runs = list_runs(store)
     if runs:
-        rows = [{"run_id": run_id, "status": load_shadow_status(run_id)} for run_id in runs]
+        rows = [{"run_id": run_id, "status": load_shadow_status(store, run_id)} for run_id in runs]
         st.table(rows)
         st.session_state.selected_run = st.selectbox("Open run", runs, index=0)
         if st.button("Clear Selected Run Outputs"):
-            run_dir = os.path.join(artifacts_root(), st.session_state.selected_run)
-            output_dir = os.path.join(run_dir, "output")
             removed = False
             for filename in ["clean.csv", "clean_data.csv", "extracted_metadata.json"]:
-                path = os.path.join(output_dir, filename)
-                if os.path.exists(path):
-                    os.remove(path)
+                key = f"{st.session_state.selected_run}/output/{filename}"
+                if store.exists(key):
+                    store.write_bytes(key, b"", content_type="text/plain")
                     removed = True
             if removed:
                 st.success("Outputs cleared for selected run.")
@@ -136,24 +165,22 @@ with tabs[1]:
         if response:
             st.info(response.get("message", ""))
 
-        evidence = load_json(os.path.join(artifacts_root(), run_id, "evidence_packet.json"))
-        status = load_shadow_status(run_id)
+        evidence = load_json_from_store(store, f"{run_id}/evidence_packet.json")
+        status = load_shadow_status(store, run_id)
         if response and response.get("status"):
             status = response["status"]
         st.write(f"Status: {status}")
-        st.write(f"Source file: {evidence.get('file_path', 'n/a')}")
+        st.write(f"Source: {evidence.get('source_uri') or 'n/a'}")
         if evidence.get("structural_hash"):
             st.write(f"Structural hash: {evidence.get('structural_hash')}")
 
-        manual_recipe_path = os.path.join(artifacts_root(), run_id, "manual_recipe.json")
-        proposed_recipe_path = os.path.join(artifacts_root(), run_id, "proposed_recipe.json")
         initial_recipe = None
-        if os.path.exists(manual_recipe_path):
-            initial_recipe = load_json(manual_recipe_path)
-        elif os.path.exists(proposed_recipe_path):
-            initial_recipe = load_json(proposed_recipe_path)
+        if store.exists(f"{run_id}/manual_recipe.json"):
+            initial_recipe = load_json_from_store(store, f"{run_id}/manual_recipe.json")
+        elif store.exists(f"{run_id}/proposed_recipe.json"):
+            initial_recipe = load_json_from_store(store, f"{run_id}/proposed_recipe.json")
 
-        df_raw = load_dataframe_for_run(evidence)
+        df_raw = load_dataframe_for_run(store, run_id, evidence)
         normalized_status = status
         if status == "needs_human_confirmation":
             normalized_status = "needs_confirmation"
@@ -183,8 +210,11 @@ with tabs[1]:
                         if not has_columns:
                             st.warning("Add at least one Table Column field before saving the recipe.")
                         else:
-                            with open(manual_recipe_path, "w", encoding="utf-8") as handle:
-                                json.dump(payload, handle, indent=2, ensure_ascii=True)
+                            store.write_text(
+                                f"{run_id}/manual_recipe.json",
+                                json.dumps(payload, indent=2, ensure_ascii=True),
+                                content_type="application/json",
+                            )
                             response_after = puhemies_continue(run_id, artifacts_root())
                             st.session_state.response = response_after.to_dict()
                             st.success("Manual recipe saved. Run resumed.")
@@ -193,18 +223,17 @@ with tabs[1]:
         elif normalized_status == "needs_confirmation":
             st.warning("Run needs confirmation, but no readable source file is available.")
 
-        output_dir = os.path.join(artifacts_root(), run_id, "output")
-        clean_data_path = os.path.join(output_dir, "clean_data.csv")
-        clean_path = os.path.join(output_dir, "clean.csv")
-        metadata_path = os.path.join(output_dir, "extracted_metadata.json")
-        if os.path.exists(clean_data_path) or os.path.exists(clean_path):
+        clean_data_key = f"{run_id}/output/clean_data.csv"
+        clean_key = f"{run_id}/output/clean.csv"
+        metadata_key = f"{run_id}/output/extracted_metadata.json"
+        if store.exists(clean_data_key) or store.exists(clean_key):
             st.subheader("Outputs")
-        if os.path.exists(clean_data_path):
-            st.write(f"Table: {os.path.relpath(clean_data_path, REPO_ROOT)}")
-            st.write(f"Rows written: {count_rows(clean_data_path)}")
+        if store.exists(clean_data_key):
+            st.write(f"Table: {store.uri_for_key(clean_data_key)}")
+            st.write(f"Rows written: {count_rows(store, clean_data_key)}")
             st.caption("Note: outputs persist across reruns; clear artifacts to regenerate.")
-        if os.path.exists(clean_path):
-            st.write(f"Table: {os.path.relpath(clean_path, REPO_ROOT)}")
-            st.write(f"Rows written: {count_rows(clean_path)}")
-        if os.path.exists(metadata_path):
-            st.write(f"Metadata: {os.path.relpath(metadata_path, REPO_ROOT)}")
+        if store.exists(clean_key):
+            st.write(f"Table: {store.uri_for_key(clean_key)}")
+            st.write(f"Rows written: {count_rows(store, clean_key)}")
+        if store.exists(metadata_key):
+            st.write(f"Metadata: {store.uri_for_key(metadata_key)}")

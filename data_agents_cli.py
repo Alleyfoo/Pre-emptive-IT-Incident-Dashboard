@@ -4,6 +4,7 @@ import os
 import sys
 from datetime import datetime
 
+from runtime.artifact_store import build_artifact_store
 from runtime.excel_flow import puhemies_continue, puhemies_orchestrate, puhemies_run_from_file, write_human_confirmation
 
 
@@ -12,7 +13,7 @@ def _repo_root() -> str:
 
 
 def _artifacts_root() -> str:
-    return os.path.join(_repo_root(), "artifacts")
+    return os.environ.get("ARTIFACTS_ROOT") or os.path.join(_repo_root(), "artifacts")
 
 
 def _print_choices(choices):
@@ -22,11 +23,11 @@ def _print_choices(choices):
 
 
 def _load_header_candidates(artifacts_root, run_id):
-    header_path = os.path.join(artifacts_root, run_id, "header_spec.json")
-    if not os.path.exists(header_path):
+    store = build_artifact_store(artifacts_root)
+    header_key = f"{run_id}/header_spec.json"
+    if not store.exists(header_key):
         raise FileNotFoundError("header_spec.json not found for run.")
-    with open(header_path, "r", encoding="utf-8") as handle:
-        header_spec = json.load(handle)
+    header_spec = json.loads(store.read_text(header_key))
     return header_spec.get("candidates", [])
 
 

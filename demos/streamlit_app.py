@@ -4,11 +4,12 @@ from datetime import datetime
 
 import streamlit as st
 
+from runtime.artifact_store import build_artifact_store
+from runtime.excel_flow import puhemies_continue, puhemies_run_from_file, write_human_confirmation
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
-
-from runtime.excel_flow import puhemies_continue, puhemies_run_from_file, write_human_confirmation
 
 
 def repo_root() -> str:
@@ -16,7 +17,11 @@ def repo_root() -> str:
 
 
 def artifacts_root() -> str:
-    return os.path.join(repo_root(), "artifacts")
+    return os.environ.get("ARTIFACTS_ROOT") or os.path.join(repo_root(), "artifacts")
+
+
+def artifact_store():
+    return build_artifact_store(artifacts_root())
 
 
 def uploads_dir() -> str:
@@ -25,14 +30,15 @@ def uploads_dir() -> str:
     return path
 
 
-def count_rows(csv_path: str) -> int:
-    if not os.path.exists(csv_path):
+def count_rows_from_store(store, key: str) -> int:
+    if not store.exists(key):
         return 0
-    with open(csv_path, "r", encoding="utf-8") as handle:
-        return max(0, sum(1 for _ in handle) - 1)
+    text = store.read_text(key)
+    lines = text.splitlines()
+    return max(0, len(lines) - 1)
 
 
-st.set_page_config(page_title="Data Agents Demo", page_icon="📊")
+st.set_page_config(page_title="Data Agents Demo", page_icon="D")
 st.title("Data Agents Demo")
 st.caption("Puhemies-only workflow with artifacts under artifacts/<run_id>/")
 
@@ -77,8 +83,11 @@ if st.session_state.response:
                 st.experimental_rerun()
 
     if response["status"] == "ok":
-        output_path = os.path.join(artifacts_root(), st.session_state.run_id, "output", "clean.csv")
-        relative_output = os.path.relpath(output_path, repo_root())
+        store = artifact_store()
+        output_key = f"{st.session_state.run_id}/output/clean.csv"
         st.success("Run completed.")
-        st.write(f"Output: {relative_output}")
-        st.write(f"Rows written: {count_rows(output_path)}")
+        if store.exists(output_key):
+            st.write(f"Output: {store.uri_for_key(output_key)}")
+            st.write(f"Rows written: {count_rows_from_store(store, output_key)}")
+        else:
+            st.write("Output not found yet.")

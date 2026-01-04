@@ -1,15 +1,48 @@
 import csv
 import hashlib
+import io
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from runtime.artifact_store import ArtifactStore, build_artifact_store, is_gcs_uri, parse_gcs_uri
 from runtime.data_janitor import clean_series, clean_value
+
+ARTIFACT_PREFIX = "artifacts"
+
+
+@dataclass
+class RunStore:
+    store: ArtifactStore
+    run_id: str
+
+    def artifact_key(self, filename: str) -> str:
+        return f"{ARTIFACT_PREFIX}/{self.run_id}/{filename}"
+
+    def store_key(self, filename: str) -> str:
+        return f"{self.run_id}/{filename}"
+
+    def write_json(self, filename: str, payload: dict) -> None:
+        self.store.write_text(
+            self.store_key(filename),
+            json.dumps(payload, indent=2, ensure_ascii=True),
+            content_type="application/json",
+        )
+
+    def read_json(self, filename: str) -> dict:
+        return json.loads(self.store.read_text(self.store_key(filename)))
+
+    def exists(self, filename: str) -> bool:
+        return self.store.exists(self.store_key(filename))
+
+    def uri_for(self, filename: str) -> str:
+        return self.store.uri_for_key(self.store_key(filename))
 
 # Unpivot defaults (used by future batch runner). Adjust here if needed.
 DEFAULT_UNPIVOT_ID_COLUMNS = ["product_code"]
@@ -59,27 +92,21 @@ def _header_looks_like_data(headers: List[str]) -> bool:
     return numeric_count >= max(1, len(headers) // 2)
 
 
-def _artifact_dir(artifacts_root: str, run_id: str) -> str:
-    return os.path.join(artifacts_root, run_id)
+def _build_run_store(run_id: str, artifacts_root: str) -> RunStore:
+    store = build_artifact_store(artifacts_root)
+    return RunStore(store=store, run_id=run_id)
 
 
-def _write_json(path: str, payload: dict) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=True)
+def _store_key_from_artifact_key(artifact_key: str) -> str:
+    if artifact_key.startswith(f"{ARTIFACT_PREFIX}/"):
+        return artifact_key[len(f"{ARTIFACT_PREFIX}/") :]
+    return artifact_key.lstrip("/")
 
 
-def _append_shadow(artifacts_root: str, run_id: str, event: str, details: dict) -> None:
-    path = os.path.join(_artifact_dir(artifacts_root, run_id), "shadow.jsonl")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    entry = {
-        "run_id": run_id,
-        "event": event,
-        "created_at": datetime.utcnow().isoformat() + "Z",
-    }
-    entry.update(details)
-    with open(path, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
+def _hash_bytes(data: bytes) -> str:
+    hasher = hashlib.sha256()
+    hasher.update(data)
+    return hasher.hexdigest()
 
 
 def _hash_file(path: str) -> str:
@@ -90,75 +117,161 @@ def _hash_file(path: str) -> str:
     return hasher.hexdigest()
 
 
-def _compute_structural_hash(preview_rows: List[List[object]], file_path: Optional[str]) -> str:
+def _compute_structural_hash(preview_rows: List[List[object]], file_label: Optional[str]) -> str:
     preview_limit = preview_rows[:5]
     flattened = ["|".join(_normalize_label(value) for value in row) for row in preview_limit]
-    if file_path:
-        flattened.append(os.path.basename(file_path).lower())
     digest = hashlib.sha256("\n".join(flattened).encode("utf-8"))
     return digest.hexdigest()
 
 
-def _recipe_index_path(artifacts_root: str) -> str:
-    return os.path.join(artifacts_root, "recipe_store", "recipe_index.json")
+def _append_shadow(run_store: RunStore, event: str, details: dict) -> None:
+    key = run_store.store_key("shadow.jsonl")
+    entry = {
+        "run_id": run_store.run_id,
+        "event": event,
+        "created_at": datetime.utcnow().isoformat() + "Z",
+    }
+    entry.update(details)
+    line = json.dumps(entry, ensure_ascii=True)
+    if run_store.store.exists(key):
+        existing = run_store.store.read_text(key)
+        separator = ""
+        if existing and not existing.endswith("\n"):
+            separator = "\n"
+        content = f"{existing}{separator}{line}\n"
+    else:
+        content = f"{line}\n"
+    run_store.store.write_text(key, content, content_type="application/json")
 
 
-def _load_recipe_index(artifacts_root: str) -> Dict[str, dict]:
-    path = _recipe_index_path(artifacts_root)
-    if not os.path.exists(path):
+RECIPE_INDEX_KEY = "recipe_store/recipe_index.json"
+
+
+def _recipe_store_key(structural_hash: str) -> str:
+    return f"recipe_store/{structural_hash}/manual_recipe.json"
+
+
+def _recipe_artifact_key(structural_hash: str) -> str:
+    return f"{ARTIFACT_PREFIX}/{_recipe_store_key(structural_hash)}"
+
+
+def _load_recipe_index(store: ArtifactStore) -> Dict[str, dict]:
+    if not store.exists(RECIPE_INDEX_KEY):
         return {}
-    with open(path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
+    return json.loads(store.read_text(RECIPE_INDEX_KEY))
 
 
-def _save_recipe_index(artifacts_root: str, payload: Dict[str, dict]) -> None:
-    path = _recipe_index_path(artifacts_root)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=True)
+def _save_recipe_index(store: ArtifactStore, payload: Dict[str, dict]) -> None:
+    store.write_text(
+        RECIPE_INDEX_KEY,
+        json.dumps(payload, indent=2, ensure_ascii=True),
+        content_type="application/json",
+    )
 
 
-def _lookup_recipe_for_hash(artifacts_root: str, structural_hash: str) -> Optional[dict]:
-    index = _load_recipe_index(artifacts_root)
+def _input_temp_dir(run_id: str) -> str:
+    path = os.path.join(tempfile.gettempdir(), "data-agents", run_id, "input")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _download_gcs_uri(uri: str, destination: str) -> str:
+    bucket, object_key = parse_gcs_uri(uri)
+    try:
+        from google.cloud import storage
+    except Exception as exc:  # pragma: no cover - import guard
+        raise ImportError("google-cloud-storage is required for gs:// inputs") from exc
+
+    client = storage.Client()
+    blob = client.bucket(bucket).blob(object_key)
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    blob.download_to_filename(destination)
+    return destination
+
+
+def _prepare_local_input(
+    source_uri: Optional[str],
+    input_artifact_key: Optional[str],
+    run_store: RunStore,
+) -> Optional[str]:
+    if source_uri:
+        if is_gcs_uri(source_uri):
+            filename = os.path.basename(source_uri.rstrip("/"))
+            destination = os.path.join(_input_temp_dir(run_store.run_id), filename or "input")
+            return _download_gcs_uri(source_uri, destination)
+        if source_uri.startswith("file://"):
+            path = source_uri[len("file://") :]
+            if os.path.exists(path):
+                return path
+        if os.path.isabs(source_uri) and os.path.exists(source_uri):
+            return source_uri
+
+    if input_artifact_key:
+        store_key = _store_key_from_artifact_key(input_artifact_key)
+        if run_store.store.exists(store_key):
+            data = run_store.store.read_bytes(store_key)
+            filename = os.path.basename(store_key)
+            local_path = os.path.join(_input_temp_dir(run_store.run_id), filename or "input")
+            with open(local_path, "wb") as handle:
+                handle.write(data)
+            return local_path
+
+    return None
+
+
+def _persist_input_copy(run_store: RunStore, local_input_path: str, fallback_name: str) -> str:
+    filename = os.path.basename(local_input_path) or fallback_name
+    store_key = run_store.store_key(f"input/{filename}")
+    with open(local_input_path, "rb") as handle:
+        data = handle.read()
+    run_store.store.write_bytes(store_key, data)
+    return run_store.artifact_key(f"input/{filename}")
+
+
+def _lookup_recipe_for_hash(store: ArtifactStore, structural_hash: str) -> Optional[dict]:
+    index = _load_recipe_index(store)
     entry = index.get(structural_hash)
     if not entry:
         return None
-    recipe_path = entry.get("recipe_path")
-    if not recipe_path or not os.path.exists(recipe_path):
+    recipe_key = entry.get("recipe_key")
+    if not recipe_key:
         return None
-    with open(recipe_path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
+    store_key = _store_key_from_artifact_key(recipe_key)
+    if not store.exists(store_key):
+        return None
+    return json.loads(store.read_text(store_key))
 
 
 def _store_recipe_for_hash(
-    artifacts_root: str,
+    store: ArtifactStore,
     structural_hash: str,
     recipe: dict,
     run_id: str,
 ) -> str:
-    store_dir = os.path.join(artifacts_root, "recipe_store", structural_hash)
-    os.makedirs(store_dir, exist_ok=True)
-    recipe_path = os.path.join(store_dir, "manual_recipe.json")
-    _write_json(recipe_path, recipe)
-    index = _load_recipe_index(artifacts_root)
+    recipe_store_key = _recipe_store_key(structural_hash)
+    store.write_text(
+        recipe_store_key,
+        json.dumps(recipe, indent=2, ensure_ascii=True),
+        content_type="application/json",
+    )
+    index = _load_recipe_index(store)
     index[structural_hash] = {
-        "recipe_path": recipe_path,
+        "recipe_key": _recipe_artifact_key(structural_hash),
         "stored_at": datetime.utcnow().isoformat() + "Z",
         "source_run_id": run_id,
     }
-    _save_recipe_index(artifacts_root, index)
-    return recipe_path
+    _save_recipe_index(store, index)
+    return _recipe_artifact_key(structural_hash)
 
 
 def write_human_confirmation(artifacts_root: str, run_id: str, choice_id: str, confirmed_by: str) -> None:
-    run_dir = _artifact_dir(artifacts_root, run_id)
-    os.makedirs(run_dir, exist_ok=True)
+    run_store = _build_run_store(run_id, artifacts_root)
     payload = {
         "confirmed_header_candidate": choice_id,
         "confirmed_by": confirmed_by,
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
-    _write_json(os.path.join(run_dir, "human_confirmation.json"), payload)
+    run_store.write_json("human_confirmation.json", payload)
 
 
 def _build_header_candidates(preview_rows: List[List[object]], evidence_key: str) -> List[dict]:
@@ -238,16 +351,12 @@ def _apply_type_enforcement(rows: List[List[object]], types: List[str]) -> List[
 
 
 def _write_schema_and_output(
-    run_id: str,
-    artifacts_root: str,
+    run_store: RunStore,
     data_rows: List[List[object]],
     headers: List[str],
     adapter_spec: Optional[Dict[str, object]] = None,
 ) -> None:
-    if not data_rows:
-        rows = []
-    else:
-        rows = data_rows
+    rows = data_rows or []
 
     if adapter_spec:
         canonical_fields = adapter_spec.get("canonical_fields") or []
@@ -284,7 +393,7 @@ def _write_schema_and_output(
                 }
             )
         schema_layer = "adapter"
-        evidence_keys = adapter_spec.get("evidence_keys") or [f"artifacts/{run_id}/header_spec.json"]
+        evidence_keys = adapter_spec.get("evidence_keys") or [run_store.artifact_key("header_spec.json")]
     else:
         schema_fields = []
         columns = list(zip(*rows)) if rows else [[] for _ in headers]
@@ -301,11 +410,11 @@ def _write_schema_and_output(
                 }
             )
         schema_layer = "core"
-        evidence_keys = [f"artifacts/{run_id}/header_spec.json"]
+        evidence_keys = [run_store.artifact_key("header_spec.json")]
 
     schema_spec = {
-        "run_id": run_id,
-        "artifact_key": f"artifacts/{run_id}/schema_spec.json",
+        "run_id": run_store.run_id,
+        "artifact_key": run_store.artifact_key("schema_spec.json"),
         "schema_layer": schema_layer,
         "schema_spec": {"fields": schema_fields, "unmapped_columns": []},
         "confidence": 0.7,
@@ -313,27 +422,31 @@ def _write_schema_and_output(
         "evidence_keys": evidence_keys,
         "refusal_reason": None,
     }
-    _write_json(os.path.join(_artifact_dir(artifacts_root, run_id), "schema_spec.json"), schema_spec)
+    run_store.write_json("schema_spec.json", schema_spec)
 
-    output_dir = os.path.join(_artifact_dir(artifacts_root, run_id), "output")
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "clean.csv")
-    with open(output_path, "w", encoding="utf-8", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(headers)
-        writer.writerows(rows)
+    csv_buffer = io.StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    run_store.store.write_bytes(
+        run_store.store_key("output/clean.csv"),
+        csv_buffer.getvalue().encode("utf-8"),
+        content_type="text/csv",
+    )
 
+    saved_artifacts = [run_store.artifact_key("output/clean.csv")]
     save_manifest = {
-        "run_id": run_id,
-        "artifact_key": f"artifacts/{run_id}/save_manifest.json",
-        "saved_files": [output_path],
+        "run_id": run_store.run_id,
+        "artifact_key": run_store.artifact_key("save_manifest.json"),
+        "saved_files": saved_artifacts,
+        "saved_uris": [run_store.uri_for("output/clean.csv")],
         "report_paths": [],
         "confidence": 0.7,
         "alternatives": [],
         "evidence_keys": [schema_spec["artifact_key"]],
         "refusal_reason": None,
     }
-    _write_json(os.path.join(_artifact_dir(artifacts_root, run_id), "save_manifest.json"), save_manifest)
+    run_store.write_json("save_manifest.json", save_manifest)
 
 
 def _read_preview_rows(input_path: str, max_rows: int = 5) -> Tuple[List[List[object]], Optional[str]]:
@@ -442,16 +555,16 @@ def _apply_table_region(
 
 
 def _apply_header_override(
-    run_id: str,
-    artifacts_root: str,
+    run_store: RunStore,
     override: Dict[str, object],
     evidence: Dict[str, object],
+    input_path: Optional[str],
 ) -> Tuple[List[str], int]:
     sheet_name = override.get("sheet_name") or evidence.get("sheet_name")
     header_row_index = int(override.get("header_row_index", 0))
     raw_headers: List[object]
-    if evidence.get("file_path"):
-        raw_headers = _read_header_row(evidence["file_path"], header_row_index, sheet_name)
+    if input_path:
+        raw_headers = _read_header_row(input_path, header_row_index, sheet_name)
     else:
         preview_rows = evidence.get("preview_rows", [])
         raw_headers = preview_rows[header_row_index] if header_row_index < len(preview_rows) else []
@@ -461,8 +574,8 @@ def _apply_header_override(
     final_headers = [edited_headers.get(header, header) for header in normalized_headers]
 
     header_spec = {
-        "run_id": run_id,
-        "artifact_key": f"artifacts/{run_id}/header_spec.json",
+        "run_id": run_store.run_id,
+        "artifact_key": run_store.artifact_key("header_spec.json"),
         "selected_candidate_id": "manual",
         "candidates": [
             {
@@ -478,13 +591,8 @@ def _apply_header_override(
         "alternatives": [],
         "refusal_reason": None,
     }
-    _write_json(os.path.join(_artifact_dir(artifacts_root, run_id), "header_spec.json"), header_spec)
-    _append_shadow(
-        artifacts_root,
-        run_id,
-        "header_override_applied",
-        {"header_row_index": header_row_index, "sheet_name": sheet_name},
-    )
+    run_store.write_json("header_spec.json", header_spec)
+    _append_shadow(run_store, "header_override_applied", {"header_row_index": header_row_index, "sheet_name": sheet_name})
     return final_headers, header_row_index
 
 
@@ -642,25 +750,23 @@ def _resolve_header_row(recipe: dict, df: pd.DataFrame, column_fields: List[dict
 
 
 def _write_manual_recipe_outputs(
-    run_id: str,
-    artifacts_root: str,
+    run_store: RunStore,
     column_fields: List[dict],
     data_rows: List[List[object]],
     metadata: Dict[str, object],
 ) -> None:
-    run_dir = _artifact_dir(artifacts_root, run_id)
-    output_dir = os.path.join(run_dir, "output")
-    os.makedirs(output_dir, exist_ok=True)
-
     column_targets = [field["target"] for field in column_fields]
-    clean_data_path = os.path.join(output_dir, "clean_data.csv")
-    with open(clean_data_path, "w", encoding="utf-8", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(column_targets)
-        writer.writerows(data_rows)
+    clean_data_buffer = io.StringIO()
+    writer = csv.writer(clean_data_buffer)
+    writer.writerow(column_targets)
+    writer.writerows(data_rows)
+    run_store.store.write_bytes(
+        run_store.store_key("output/clean_data.csv"),
+        clean_data_buffer.getvalue().encode("utf-8"),
+        content_type="text/csv",
+    )
 
-    metadata_path = os.path.join(output_dir, "extracted_metadata.json")
-    _write_json(metadata_path, metadata)
+    run_store.write_json("output/extracted_metadata.json", metadata)
 
     schema_fields = []
     if column_fields:
@@ -679,38 +785,45 @@ def _write_manual_recipe_outputs(
             )
 
     schema_spec = {
-        "run_id": run_id,
-        "artifact_key": f"artifacts/{run_id}/schema_spec.json",
+        "run_id": run_store.run_id,
+        "artifact_key": run_store.artifact_key("schema_spec.json"),
         "schema_layer": "manual_recipe",
         "schema_spec": {"fields": schema_fields, "unmapped_columns": []},
         "confidence": 0.9,
         "alternatives": [],
-        "evidence_keys": [f"artifacts/{run_id}/manual_recipe.json"],
+        "evidence_keys": [run_store.artifact_key("manual_recipe.json")],
         "refusal_reason": None,
     }
-    _write_json(os.path.join(run_dir, "schema_spec.json"), schema_spec)
+    run_store.write_json("schema_spec.json", schema_spec)
 
     save_manifest = {
-        "run_id": run_id,
-        "artifact_key": f"artifacts/{run_id}/save_manifest.json",
-        "saved_files": [clean_data_path, metadata_path],
+        "run_id": run_store.run_id,
+        "artifact_key": run_store.artifact_key("save_manifest.json"),
+        "saved_files": [
+            run_store.artifact_key("output/clean_data.csv"),
+            run_store.artifact_key("output/extracted_metadata.json"),
+        ],
+        "saved_uris": [
+            run_store.uri_for("output/clean_data.csv"),
+            run_store.uri_for("output/extracted_metadata.json"),
+        ],
         "report_paths": [],
         "confidence": 0.9,
         "alternatives": [],
         "evidence_keys": [schema_spec["artifact_key"]],
         "refusal_reason": None,
     }
-    _write_json(os.path.join(run_dir, "save_manifest.json"), save_manifest)
+    run_store.write_json("save_manifest.json", save_manifest)
 
 
 def _apply_manual_recipe(
-    run_id: str,
-    artifacts_root: str,
+    run_store: RunStore,
     recipe: dict,
     evidence: dict,
+    input_path: Optional[str],
 ) -> None:
-    if not evidence.get("file_path"):
-        raise ValueError("Manual recipe requires a file path in evidence.")
+    if not input_path:
+        raise ValueError("Manual recipe requires a readable input file.")
 
     fields = recipe.get("fields") or []
     metadata_fields, column_fields, warnings = _collect_manual_recipe_fields(fields)
@@ -719,7 +832,7 @@ def _apply_manual_recipe(
     if not column_fields:
         raise ValueError("Manual recipe must include at least one column field to build a table.")
 
-    df = _read_sheet_dataframe(evidence["file_path"], evidence.get("sheet_name"))
+    df = _read_sheet_dataframe(input_path, evidence.get("sheet_name"))
     header_row = _resolve_header_row(recipe, df, column_fields)
 
     header_values = []
@@ -790,16 +903,9 @@ def _apply_manual_recipe(
         metadata_fields,
     )
 
-    _write_manual_recipe_outputs(
-        run_id,
-        artifacts_root,
-        merged_columns,
-        output_rows,
-        extracted_metadata,
-    )
+    _write_manual_recipe_outputs(run_store, merged_columns, output_rows, extracted_metadata)
     _append_shadow(
-        artifacts_root,
-        run_id,
+        run_store,
         "manual_recipe_applied",
         {
             "header_row": header_row,
@@ -811,7 +917,7 @@ def _apply_manual_recipe(
 
     structural_hash = evidence.get("structural_hash")
     if structural_hash:
-        _store_recipe_for_hash(artifacts_root, structural_hash, recipe, run_id)
+        _store_recipe_for_hash(run_store.store, structural_hash, recipe, run_store.run_id)
 
 
 def puhemies_orchestrate(
@@ -820,27 +926,42 @@ def puhemies_orchestrate(
     artifacts_root: str,
     file_path: Optional[str] = None,
     sheet_name: Optional[str] = None,
+    source_uri: Optional[str] = None,
+    input_artifact_key: Optional[str] = None,
+    structural_hash: Optional[str] = None,
+    file_hash: Optional[str] = None,
 ) -> PuhemiesResponse:
+    run_store = _build_run_store(run_id, artifacts_root)
     evidence = {
         "run_id": run_id,
-        "artifact_key": f"artifacts/{run_id}/evidence_packet.json",
+        "artifact_key": run_store.artifact_key("evidence_packet.json"),
         "preview_rows": preview_rows,
         "notes": "synthetic preview rows",
     }
-    if file_path:
-        evidence["file_path"] = file_path
-        evidence["file_hash"] = _hash_file(file_path)
-        evidence["structural_hash"] = _compute_structural_hash(preview_rows, file_path)
+    source_label = file_path or source_uri
+    if source_uri or file_path:
+        evidence["source_uri"] = source_uri or f"file://{os.path.abspath(file_path)}"
+    if input_artifact_key:
+        evidence["input_artifact_key"] = input_artifact_key
+    if file_hash:
+        evidence["file_hash"] = file_hash
+    if structural_hash:
+        evidence["structural_hash"] = structural_hash
     if sheet_name:
         evidence["sheet_name"] = sheet_name
-    _write_json(os.path.join(_artifact_dir(artifacts_root, run_id), "evidence_packet.json"), evidence)
+    filename = os.path.basename(source_label or "")
+    if filename:
+        evidence["input_filename"] = filename
+    if "structural_hash" not in evidence:
+        evidence["structural_hash"] = _compute_structural_hash(preview_rows, source_label)
+    run_store.write_json("evidence_packet.json", evidence)
 
     candidates = _build_header_candidates(preview_rows, evidence["artifact_key"])
     selected = _select_candidate(candidates)
     selected_id = selected["candidate_id"] if selected else ""
     header_spec = {
         "run_id": run_id,
-        "artifact_key": f"artifacts/{run_id}/header_spec.json",
+        "artifact_key": run_store.artifact_key("header_spec.json"),
         "selected_candidate_id": selected_id,
         "candidates": candidates,
         "needs_human_confirmation": False,
@@ -850,13 +971,8 @@ def puhemies_orchestrate(
 
     if selected and _header_looks_like_data(selected["normalized_headers"]):
         header_spec["needs_human_confirmation"] = True
-        _write_json(os.path.join(_artifact_dir(artifacts_root, run_id), "header_spec.json"), header_spec)
-        _append_shadow(
-            artifacts_root,
-            run_id,
-            "stop_due_to_ambiguous_headers",
-            {"selected_candidate_id": selected_id},
-        )
+        run_store.write_json("header_spec.json", header_spec)
+        _append_shadow(run_store, "stop_due_to_ambiguous_headers", {"selected_candidate_id": selected_id})
         return PuhemiesResponse(
             run_id=run_id,
             status="needs_human_confirmation",
@@ -873,8 +989,8 @@ def puhemies_orchestrate(
             next_step="provide_confirmed_header_candidate",
         )
 
-    _write_json(os.path.join(_artifact_dir(artifacts_root, run_id), "header_spec.json"), header_spec)
-    _append_shadow(artifacts_root, run_id, "header_selection_ok", {"selected_candidate_id": selected_id})
+    run_store.write_json("header_spec.json", header_spec)
+    _append_shadow(run_store, "header_selection_ok", {"selected_candidate_id": selected_id})
 
     return PuhemiesResponse(
         run_id=run_id,
@@ -885,26 +1001,18 @@ def puhemies_orchestrate(
 
 
 def puhemies_continue(run_id: str, artifacts_root: str) -> PuhemiesResponse:
-    run_dir = _artifact_dir(artifacts_root, run_id)
-    confirmation_path = os.path.join(run_dir, "human_confirmation.json")
-    header_path = os.path.join(run_dir, "header_spec.json")
-    evidence_path = os.path.join(run_dir, "evidence_packet.json")
-    adapter_path = os.path.join(run_dir, "adapter_schema_spec.json")
-    table_region_path = os.path.join(run_dir, "table_region.json")
-    header_override_path = os.path.join(run_dir, "header_override.json")
-    manual_recipe_path = os.path.join(run_dir, "manual_recipe.json")
+    run_store = _build_run_store(run_id, artifacts_root)
+    evidence = run_store.read_json("evidence_packet.json")
 
-    with open(evidence_path, "r", encoding="utf-8") as handle:
-        evidence = json.load(handle)
-
-    if evidence.get("file_path") and evidence.get("file_hash"):
-        current_hash = _hash_file(evidence["file_path"])
-        if current_hash != evidence["file_hash"]:
+    input_path = _prepare_local_input(evidence.get("source_uri"), evidence.get("input_artifact_key"), run_store)
+    expected_hash = evidence.get("file_hash")
+    if expected_hash and input_path:
+        current_hash = _hash_file(input_path)
+        if current_hash != expected_hash:
             _append_shadow(
-                artifacts_root,
-                run_id,
+                run_store,
                 "resume_guard_file_changed",
-                {"expected_hash": evidence["file_hash"], "current_hash": current_hash},
+                {"expected_hash": expected_hash, "current_hash": current_hash},
             )
             return PuhemiesResponse(
                 run_id=run_id,
@@ -913,12 +1021,17 @@ def puhemies_continue(run_id: str, artifacts_root: str) -> PuhemiesResponse:
                 question="Please re-run with the updated file.",
                 next_step="rerun_required",
             )
+    elif expected_hash and not input_path:
+        _append_shadow(
+            run_store,
+            "resume_guard_source_missing",
+            {"expected_hash": expected_hash, "source_uri": evidence.get("source_uri")},
+        )
 
-    if os.path.exists(manual_recipe_path):
-        with open(manual_recipe_path, "r", encoding="utf-8") as handle:
-            manual_recipe = json.load(handle)
+    if run_store.exists("manual_recipe.json"):
+        manual_recipe = run_store.read_json("manual_recipe.json")
         try:
-            _apply_manual_recipe(run_id, artifacts_root, manual_recipe, evidence)
+            _apply_manual_recipe(run_store, manual_recipe, evidence, input_path)
         except ValueError as exc:
             return PuhemiesResponse(
                 run_id=run_id,
@@ -934,12 +1047,11 @@ def puhemies_continue(run_id: str, artifacts_root: str) -> PuhemiesResponse:
             next_step="review_artifacts",
         )
 
-    if os.path.exists(header_override_path):
-        with open(header_override_path, "r", encoding="utf-8") as handle:
-            override = json.load(handle)
-        headers, header_row = _apply_header_override(run_id, artifacts_root, override, evidence)
+    if run_store.exists("header_override.json"):
+        override = run_store.read_json("header_override.json")
+        headers, header_row = _apply_header_override(run_store, override, evidence, input_path)
     else:
-        if not os.path.exists(confirmation_path):
+        if not run_store.exists("human_confirmation.json"):
             return PuhemiesResponse(
                 run_id=run_id,
                 status="needs_human_confirmation",
@@ -948,11 +1060,8 @@ def puhemies_continue(run_id: str, artifacts_root: str) -> PuhemiesResponse:
                 next_step="write_human_confirmation",
             )
 
-        with open(header_path, "r", encoding="utf-8") as handle:
-            header_spec = json.load(handle)
-
-        with open(confirmation_path, "r", encoding="utf-8") as handle:
-            confirmation = json.load(handle)
+        header_spec = run_store.read_json("header_spec.json")
+        confirmation = run_store.read_json("human_confirmation.json")
 
         confirmed_id = confirmation.get("confirmed_header_candidate")
         selected = next(
@@ -967,36 +1076,29 @@ def puhemies_continue(run_id: str, artifacts_root: str) -> PuhemiesResponse:
                 next_step="write_human_confirmation",
             )
 
-        _append_shadow(
-            artifacts_root,
-            run_id,
-            "human_confirmation_received",
-            {"confirmed_header_candidate": confirmed_id},
-        )
+        _append_shadow(run_store, "human_confirmation_received", {"confirmed_header_candidate": confirmed_id})
 
         headers = selected["normalized_headers"]
         header_row = selected["header_rows"][0]
 
-    if evidence.get("file_path"):
+    if input_path:
         data_rows = _read_data_rows(
-            evidence["file_path"],
+            input_path,
             header_row,
             evidence.get("sheet_name"),
         )
     else:
         data_rows = evidence.get("preview_rows", [])[header_row + 1 :]
     adapter_spec = None
-    if os.path.exists(adapter_path):
-        with open(adapter_path, "r", encoding="utf-8") as handle:
-            adapter_spec = json.load(handle)
+    if run_store.exists("adapter_schema_spec.json"):
+        adapter_spec = run_store.read_json("adapter_schema_spec.json")
 
     table_region = None
-    if os.path.exists(table_region_path):
-        with open(table_region_path, "r", encoding="utf-8") as handle:
-            table_region = json.load(handle)
+    if run_store.exists("table_region.json"):
+        table_region = run_store.read_json("table_region.json")
 
     headers, data_rows = _apply_table_region(headers, data_rows, header_row, table_region)
-    _write_schema_and_output(run_id, artifacts_root, data_rows, headers, adapter_spec=adapter_spec)
+    _write_schema_and_output(run_store, data_rows, headers, adapter_spec=adapter_spec)
 
     return PuhemiesResponse(
         run_id=run_id,
@@ -1007,25 +1109,34 @@ def puhemies_continue(run_id: str, artifacts_root: str) -> PuhemiesResponse:
 
 
 def puhemies_run_from_file(run_id: str, input_path: str, artifacts_root: str) -> PuhemiesResponse:
-    preview_rows, sheet_name = _read_preview_rows(input_path)
+    run_store = _build_run_store(run_id, artifacts_root)
+    if is_gcs_uri(input_path):
+        filename = os.path.basename(input_path.rstrip("/")) or "input"
+        local_input = _download_gcs_uri(input_path, os.path.join(_input_temp_dir(run_id), filename))
+        source_uri = input_path
+    else:
+        local_input = os.path.abspath(input_path)
+        source_uri = f"file://{local_input}"
+
+    preview_rows, sheet_name = _read_preview_rows(local_input)
+    file_hash = _hash_file(local_input)
+    structural_hash = _compute_structural_hash(preview_rows, os.path.basename(local_input))
+    input_artifact_key = _persist_input_copy(run_store, local_input, os.path.basename(local_input) or "input")
+
     response = puhemies_orchestrate(
         run_id,
         preview_rows,
         artifacts_root,
-        file_path=input_path,
+        file_path=local_input,
         sheet_name=sheet_name,
+        source_uri=source_uri,
+        input_artifact_key=input_artifact_key,
+        structural_hash=structural_hash,
+        file_hash=file_hash,
     )
-    structural_hash = _compute_structural_hash(preview_rows, input_path)
-    recalled = _lookup_recipe_for_hash(artifacts_root, structural_hash)
+    recalled = _lookup_recipe_for_hash(run_store.store, structural_hash)
     if recalled:
-        run_dir = _artifact_dir(artifacts_root, run_id)
-        os.makedirs(run_dir, exist_ok=True)
-        _write_json(os.path.join(run_dir, "manual_recipe.json"), recalled)
-        _append_shadow(
-            artifacts_root,
-            run_id,
-            "manual_recipe_recalled",
-            {"structural_hash": structural_hash},
-        )
+        run_store.write_json("manual_recipe.json", recalled)
+        _append_shadow(run_store, "manual_recipe_recalled", {"structural_hash": structural_hash})
         return puhemies_continue(run_id, artifacts_root)
     return response

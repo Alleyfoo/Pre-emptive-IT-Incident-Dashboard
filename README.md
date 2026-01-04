@@ -32,6 +32,13 @@ Outputs land in `artifacts/<run-id>/`, including `clean.csv`, `schema_spec.json`
 - Streamlit mapping studio: `streamlit run demos/streamlit_mapping_studio.py`
 - Convenience launchers (Windows): `demos/run_tui_demo.bat`, `demos/run_streamlit_demo.bat`
 
+## Local vs Cloud
+
+- Local dev: leave `ARTIFACTS_ROOT` unset to default to `./artifacts`; install with `pip install -r demos/requirements-demo.txt`; run `streamlit run demos/streamlit_app.py`.
+- Cloud Storage: set `ARTIFACTS_ROOT=gs://your-bucket/artifacts` and run the CLI or Streamlit apps; artifacts are written via the storage abstraction instead of container paths.
+- Cloud Run: build with the provided `Dockerfile` and deploy with `gcloud run deploy ... --set-env-vars ARTIFACTS_ROOT=gs://your-bucket/artifacts`; the app binds to `$PORT` on `0.0.0.0`.
+- Inputs are copied into the artifact store, so resume checks don’t depend on container-local paths.
+
 ## What this demo does
 
 - Detects likely header rows and asks for confirmation when ambiguous.

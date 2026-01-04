@@ -1,6 +1,8 @@
+import io
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime
 from typing import Dict, List
 
@@ -11,45 +13,66 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+from runtime.artifact_store import build_artifact_store
 from runtime.excel_flow import puhemies_continue, puhemies_run_from_file, write_human_confirmation
 
 
 def artifacts_root() -> str:
-    return os.path.join(REPO_ROOT, "artifacts")
+    tmp_default = os.path.join(os.environ.get("TMPDIR", "/tmp"), "artifacts")
+    return os.environ.get("ARTIFACTS_ROOT") or tmp_default
+
+
+def artifact_store():
+    return build_artifact_store(artifacts_root())
+
+
+def _path_to_store_key(path: str) -> str:
+    root = artifacts_root()
+    if path.startswith(root):
+        rel = os.path.relpath(path, root)
+        return rel.replace("\\", "/")
+    return path
 
 
 def uploads_dir() -> str:
-    path = os.path.join(REPO_ROOT, "demos", ".uploads")
+    path = os.environ.get("UPLOADS_DIR") or os.path.join(os.environ.get("TMPDIR", "/tmp"), "uploads")
     os.makedirs(path, exist_ok=True)
     return path
 
 
 def load_json(path: str) -> Dict:
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
+    store = artifact_store()
+    key = _path_to_store_key(path)
+    if store.exists(key):
+        return json.loads(store.read_text(key))
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    return {}
 
 
 def list_runs() -> List[str]:
-    root = artifacts_root()
-    if not os.path.exists(root):
-        return []
-    return sorted([name for name in os.listdir(root) if os.path.isdir(os.path.join(root, name))], reverse=True)
+    store = artifact_store()
+    run_ids = set()
+    for key in store.list(""):
+        parts = key.split("/")
+        if parts and parts[0]:
+            run_ids.add(parts[0])
+    return sorted(run_ids, reverse=True)
 
 
 def load_shadow_status(run_id: str) -> str:
-    shadow_path = os.path.join(artifacts_root(), run_id, "shadow.jsonl")
-    if not os.path.exists(shadow_path):
+    store = artifact_store()
+    shadow_key = f"{run_id}/shadow.jsonl"
+    if not store.exists(shadow_key):
         return "new"
     last_event = None
-    with open(shadow_path, "r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.strip():
-                last_event = json.loads(line).get("event")
+    for line in store.read_text(shadow_key).splitlines():
+        if line.strip():
+            last_event = json.loads(line).get("event")
     if last_event in ["stop_due_to_ambiguous_headers", "resume_guard_file_changed"]:
         return "needs_confirmation"
-    if os.path.exists(os.path.join(artifacts_root(), run_id, "save_manifest.json")):
+    if store.exists(f"{run_id}/save_manifest.json"):
         return "ok"
     return last_event or "unknown"
 
@@ -74,34 +97,66 @@ def load_preview_rows(run_id: str) -> List[List[object]]:
 
 
 def write_table_region(run_id: str, payload: Dict) -> None:
-    path = os.path.join(artifacts_root(), run_id, "table_region.json")
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=True)
+    store = artifact_store()
+    store.write_text(
+        f"{run_id}/table_region.json",
+        json.dumps(payload, indent=2, ensure_ascii=True),
+        content_type="application/json",
+    )
 
 
 def write_adapter_schema(run_id: str, payload: Dict) -> None:
-    path = os.path.join(artifacts_root(), run_id, "adapter_schema_spec.json")
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=True)
+    store = artifact_store()
+    store.write_text(
+        f"{run_id}/adapter_schema_spec.json",
+        json.dumps(payload, indent=2, ensure_ascii=True),
+        content_type="application/json",
+    )
 
 
 def count_rows(csv_path: str) -> int:
-    if not os.path.exists(csv_path):
-        return 0
-    with open(csv_path, "r", encoding="utf-8") as handle:
-        return max(0, sum(1 for _ in handle) - 1)
+    store = artifact_store()
+    key = _path_to_store_key(csv_path)
+    if store.exists(key):
+        text = store.read_text(key)
+        lines = text.splitlines()
+        return max(0, len(lines) - 1)
+    if os.path.exists(csv_path):
+        with open(csv_path, "r", encoding="utf-8") as handle:
+            return max(0, sum(1 for _ in handle) - 1)
+    return 0
 
 
 def find_output_files() -> List[str]:
     outputs = []
-    root = artifacts_root()
-    if not os.path.exists(root):
-        return outputs
-    for run_id in os.listdir(root):
-        output_path = os.path.join(root, run_id, "output", "clean.csv")
-        if os.path.exists(output_path):
-            outputs.append(output_path)
+    store = artifact_store()
+    for run_id in list_runs():
+        key = f"{run_id}/output/clean.csv"
+        if store.exists(key):
+            outputs.append(key)
     return outputs
+
+
+def materialize_input(run_id: str, evidence: Dict[str, object]) -> str | None:
+    store = artifact_store()
+    cache_dir = os.path.join(tempfile.gettempdir(), "data-agents-mapping", run_id)
+    artifact_key = evidence.get("input_artifact_key")
+    source_uri = evidence.get("source_uri")
+    if artifact_key:
+        store_key = artifact_key.split("artifacts/", 1)[1] if artifact_key.startswith("artifacts/") else artifact_key
+        if store.exists(store_key):
+            os.makedirs(cache_dir, exist_ok=True)
+            local_path = os.path.join(cache_dir, os.path.basename(store_key) or "input")
+            with open(local_path, "wb") as handle:
+                handle.write(store.read_bytes(store_key))
+            return local_path
+    if source_uri and source_uri.startswith("file://"):
+        path = source_uri[len("file://") :]
+        if os.path.exists(path):
+            return path
+    if source_uri and os.path.isabs(source_uri) and os.path.exists(source_uri):
+        return source_uri
+    return None
 
 
 def validation_preview(rows: List[List[object]], field_map: Dict[str, str], required_fields: List[str]) -> Dict[str, float]:
@@ -271,11 +326,11 @@ with tabs[1]:
         header_spec = load_json(os.path.join(artifacts_root(), run_id, "header_spec.json"))
         adapter_spec = load_json(os.path.join(artifacts_root(), run_id, "adapter_schema_spec.json"))
         table_region = load_json(os.path.join(artifacts_root(), run_id, "table_region.json"))
-        header_override_path = os.path.join(artifacts_root(), run_id, "header_override.json")
-        if os.path.exists(header_override_path):
+        header_override_key = f"{run_id}/header_override.json"
+        if artifact_store().exists(header_override_key):
             st.warning("Manual header override is active for this run.")
             if st.button("Clear Manual Header Override"):
-                os.remove(header_override_path)
+                artifact_store().write_text(header_override_key, "", content_type="application/json")
                 st.success("Manual header override cleared.")
 
         detail_tabs = st.tabs(
@@ -297,7 +352,7 @@ with tabs[1]:
             preview_rows = evidence.get("preview_rows", [])
             if preview_rows:
                 st.dataframe(preview_rows, use_container_width=True)
-            st.write(f"Source file: {evidence.get('file_path', 'n/a')}")
+            st.write(f"Source: {evidence.get('source_uri', 'n/a')}")
 
         with detail_tabs[1]:
             st.write("Header candidates:")
@@ -321,9 +376,9 @@ with tabs[1]:
 
         with detail_tabs[2]:
             st.write("Manual header selection (override).")
-            file_path = evidence.get("file_path", "")
+            file_path = materialize_input(run_id, evidence)
             if not file_path:
-                st.warning("No file path found in evidence. Run the flow from a file to use manual override.")
+                st.warning("No readable input found. Run the flow from a file to use manual override.")
             else:
                 preview_rows = load_preview_rows(run_id)
                 if "manual_header_row" not in st.session_state:
@@ -591,17 +646,16 @@ with tabs[1]:
                 st.write("No header selected.")
 
         with detail_tabs[7]:
-            output_path = os.path.join(artifacts_root(), run_id, "output", "clean.csv")
-            if os.path.exists(output_path):
-                relative_output = os.path.relpath(output_path, REPO_ROOT)
+            store = artifact_store()
+            output_key = f"{run_id}/output/clean.csv"
+            if store.exists(output_key):
+                text = store.read_text(output_key)
                 st.success("Output ready.")
-                st.write(f"Output: {relative_output}")
-                st.write(f"Rows written: {count_rows(output_path)}")
-                with open(output_path, "rb") as handle:
-                    st.download_button("Download CSV", handle.read(), file_name=os.path.basename(output_path))
+                st.write(f"Output: {store.uri_for_key(output_key)}")
+                st.write(f"Rows written: {max(0, len(text.splitlines()) - 1)}")
+                st.download_button("Download CSV", store.read_bytes(output_key), file_name="clean.csv")
                 st.write("Preview:")
-                with open(output_path, "r", encoding="utf-8") as handle:
-                    preview = [line.rstrip("\n").split(",") for _, line in zip(range(200), handle)]
+                preview = [line.split(",") for line in text.splitlines()[:200]]
                 st.dataframe(preview, use_container_width=True)
             else:
                 st.write("No output yet. Resume the run to generate output.")
@@ -615,28 +669,27 @@ with tabs[1]:
                 st.write(f"Found {len(output_files)} output files.")
                 if st.button("Combine All Outputs", key="combine_outputs"):
                     frames = []
-                    for path in output_files:
+                    store = artifact_store()
+                    for key in output_files:
                         try:
-                            df = pd.read_csv(path)
-                            df["source_run_id"] = os.path.basename(os.path.dirname(os.path.dirname(path)))
+                            df = pd.read_csv(io.BytesIO(store.read_bytes(key)))
+                            df["source_run_id"] = key.split("/")[0]
                             frames.append(df)
                         except Exception:
                             continue
                     if frames:
                         combined = pd.concat(frames, ignore_index=True)
-                        combined_dir = os.path.join(artifacts_root(), "combined")
-                        os.makedirs(combined_dir, exist_ok=True)
-                        combined_path = os.path.join(combined_dir, "combined.csv")
-                        combined.to_csv(combined_path, index=False)
+                        combined_payload = combined.to_csv(index=False).encode("utf-8")
+                        combined_key = "combined/combined.csv"
+                        store.write_bytes(combined_key, combined_payload, content_type="text/csv")
                         st.success("Combined output saved.")
-                        st.write(f"Output: {os.path.relpath(combined_path, REPO_ROOT)}")
+                        st.write(f"Output: {store.uri_for_key(combined_key)}")
                         st.write(f"Rows written: {len(combined)}")
                         st.dataframe(combined.head(200), use_container_width=True)
-                        with open(combined_path, "rb") as handle:
-                            st.download_button(
-                                "Download Combined CSV",
-                                handle.read(),
-                                file_name=os.path.basename(combined_path),
-                            )
+                        st.download_button(
+                            "Download Combined CSV",
+                            combined_payload,
+                            file_name="combined.csv",
+                        )
                     else:
                         st.warning("No readable outputs to combine.")
