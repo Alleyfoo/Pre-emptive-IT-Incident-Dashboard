@@ -18,9 +18,9 @@ jobs:
           python -m pip install -r demos/requirements-demo.txt
       - name: Generate scenarios
         run: ARTIFACTS_ROOT=./artifacts python -m tools.generate_ticket_scenarios --run-id ci-run --n-hosts 8 --seed 42
-      - name: Run incident flow
-        run: ARTIFACTS_ROOT=./artifacts python -m runtime.incident_flow --run-id ci-run --retention-hours 1
-      - name: Validate outputs
-        run: ARTIFACTS_ROOT=./artifacts python -m tools.validate --run-id ci-run
-      - name: Schema gate
-        run: ARTIFACTS_ROOT=./artifacts python -m runtime.schema_validate --run-id ci-run
+    - name: Run incident flow
+      run: ARTIFACTS_ROOT=./artifacts python -m runtime.incident_flow --run-id ci-run --retention-hours 1
+    - name: Validate outputs
+      run: ARTIFACTS_ROOT=./artifacts python -m tools.validate --run-id ci-run --strict-scenario
+    - name: Schema gate
+      run: ARTIFACTS_ROOT=./artifacts python -m runtime.schema_validate --run-id ci-run

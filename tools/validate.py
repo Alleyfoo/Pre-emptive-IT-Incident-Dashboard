@@ -58,7 +58,7 @@ def _precision_recall(truth: Set[str], detected: Set[str]) -> Dict[str, float]:
     return {"precision": precision, "recall": recall}
 
 
-def validate(run_id: str, artifacts_root: str) -> Dict[str, object]:
+def validate(run_id: str, artifacts_root: str, strict_scenario: bool = False) -> Dict[str, object]:
     store = build_artifact_store(artifacts_root)
     schema_errors = schema_validate.validate_run(store, run_id)
 
@@ -101,7 +101,7 @@ def validate(run_id: str, artifacts_root: str) -> Dict[str, object]:
     _append_shadow(store, run_id, "validation", "Validation complete", result=result)
     if schema_errors:
         raise SystemExit(f"Schema validation failed: {'; '.join(schema_errors)}")
-    if scenario_checks:
+    if strict_scenario and scenario_checks:
         raise SystemExit(f"Scenario checks failed: {'; '.join(scenario_checks)}")
     return result
 
@@ -155,8 +155,13 @@ def main() -> None:
         default=DEFAULT_ARTIFACTS_ROOT,
         help="Root for artifacts. Defaults to ARTIFACTS_ROOT or ./artifacts.",
     )
+    parser.add_argument(
+        "--strict-scenario",
+        action="store_true",
+        help="Fail validation when scenario warnings are present (useful for CI).",
+    )
     args = parser.parse_args()
-    validate(run_id=args.run_id, artifacts_root=args.artifacts_root)
+    validate(run_id=args.run_id, artifacts_root=args.artifacts_root, strict_scenario=args.strict_scenario)
 
 
 if __name__ == "__main__":
