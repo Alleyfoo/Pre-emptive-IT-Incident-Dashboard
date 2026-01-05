@@ -774,23 +774,27 @@ def _write_run_status(store: ArtifactStore, run_id: str, status: str, message: s
     store.write_json(f"{run_id}/run_status.json", payload, content_type="application/json")
 
 
-def write_host_artifacts(store: ArtifactStore, run_id: str, timelines: Dict[str, dict]) -> None:
+def write_host_artifacts(store: ArtifactStore, run_id: str, timelines: Dict[str, dict], fleet_window: Optional[dict] = None) -> None:
     for host_id, timeline in timelines.items():
         timeline_key = f"{run_id}/hosts/{host_id}/timeline.json"
         report_key = f"{run_id}/hosts/{host_id}/report.md"
         store.write_text(timeline_key, json.dumps(timeline, indent=2, ensure_ascii=True), content_type="application/json")
-        report = _render_host_report(timeline)
+        report = _render_host_report(timeline, fleet_window=fleet_window)
         store.write_text(report_key, report, content_type="text/markdown")
         _append_shadow(store, run_id, "write_host", f"Wrote artifacts for {host_id}")
 
 
-def _render_host_report(timeline: dict) -> str:
+def _render_host_report(timeline: dict, fleet_window: Optional[dict] = None) -> str:
+    window = timeline.get("window") or fleet_window or {}
+    window_start = window.get("start")
+    window_end = window.get("end")
     lines = [
         f"# Host report: {timeline.get('host_id', 'unknown')}",
         "",
-        f"Window: {timeline.get('window_start', '')} → {timeline.get('window_end', '')}",
-        "",
     ]
+    if window_start or window_end:
+        lines.append(f"Window: {window_start or ''} -> {window_end or ''}")
+        lines.append("")
     incidents = timeline.get("incidents", [])
     if not incidents:
         lines.append("No incidents detected.")
@@ -849,7 +853,7 @@ def run_incident_flow(
     )
     timelines = build_host_timelines(store, run_id, snapshots=snapshots, ticket_prefix=ticket_prefix)
     fleet = build_fleet_summary(run_id, timelines, prev_summary=prev_summary)
-    write_host_artifacts(store, run_id, timelines)
+    write_host_artifacts(store, run_id, timelines, fleet_window=fleet.get("window"))
     write_fleet_artifacts(store, run_id, fleet)
     validate_or_raise(store, run_id)
     _append_history(store, fleet)

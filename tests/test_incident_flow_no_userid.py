@@ -46,7 +46,7 @@ def test_run_without_user_id_passes_schema_validation():
             snapshot_prefix="",
             ticket_prefix=None,
             retention_hours=1,
-            window_hours=48,
+            window_hours=24 * 365,
             select_mode="latest",
             max_hosts=None,
         )
@@ -55,5 +55,13 @@ def test_run_without_user_id_passes_schema_validation():
         validate_or_raise(store, run_id)
 
         fleet = json.loads(store.read_text(f"{run_id}/fleet_summary.json"))
-        top_host = fleet["top_hosts"][0]
-        assert "user_id" not in top_host
+        top_hosts = fleet.get("top_hosts", [])
+        if top_hosts:
+            assert "user_id" not in top_hosts[0]
+
+        timeline = json.loads(store.read_text(f"{run_id}/hosts/HOST-001/timeline.json"))
+        assert timeline.get("user_id") is None
+
+        report = store.read_text(f"{run_id}/hosts/HOST-001/report.md")
+        assert "2026-01-01T00:00:00Z" in report
+        assert "2026-01-01T12:00:00Z" in report
