@@ -671,6 +671,13 @@ def build_fleet_summary(run_id: str, timelines: Dict[str, dict], prev_summary: O
     if window["end"] is None:
         window["end"] = window["start"]
     incident_count = sum(len(timeline.get("incidents", [])) for timeline in timelines.values())
+    summary = "No incidents detected in the selected window."
+    if incident_count > 0 and hosts:
+        top_types = list({inc.get("type") for tl in timelines.values() for inc in tl.get("incidents", []) if inc.get("type")})
+        summary = (
+            f"{len(timelines)} host(s) affected; {incident_count} incident(s)"
+            f" ({', '.join(top_types[:3])}); overall risk {overall}; action: {hosts[0].get('action')}."
+        )
     return {
         "schema_version": "1.0",
         "run_id": run_id,
@@ -681,6 +688,7 @@ def build_fleet_summary(run_id: str, timelines: Dict[str, dict], prev_summary: O
         "overall_risk_score": overall,
         "top_hosts": hosts,
         "clusters": clusters,
+        "executive_summary": summary,
     }
 
 
@@ -808,17 +816,23 @@ def _write_run_status(store: ArtifactStore, run_id: str, status: str, message: s
     store.write_json(f"{run_id}/run_status.json", payload, content_type="application/json")
 
 
-def write_host_artifacts(store: ArtifactStore, run_id: str, timelines: Dict[str, dict], fleet_window: Optional[dict] = None) -> None:
+def write_host_artifacts(
+    store: ArtifactStore,
+    run_id: str,
+    timelines: Dict[str, dict],
+    fleet_window: Optional[dict] = None,
+    host_meta: Optional[Dict[str, dict]] = None,
+) -> None:
     for host_id, timeline in timelines.items():
         timeline_key = f"{run_id}/hosts/{host_id}/timeline.json"
         report_key = f"{run_id}/hosts/{host_id}/report.md"
         store.write_text(timeline_key, json.dumps(timeline, indent=2, ensure_ascii=True), content_type="application/json")
-        report = _render_host_report(timeline, fleet_window=fleet_window)
+        report = _render_host_report(timeline, fleet_window=fleet_window, host_meta=(host_meta or {}).get(host_id, {}))
         store.write_text(report_key, report, content_type="text/markdown")
         _append_shadow(store, run_id, "write_host", f"Wrote artifacts for {host_id}")
 
 
-def _render_host_report(timeline: dict, fleet_window: Optional[dict] = None) -> str:
+def _render_host_report(timeline: dict, fleet_window: Optional[dict] = None, host_meta: Optional[dict] = None) -> str:
     incidents = timeline.get("incidents", [])
     window = timeline.get("window") or fleet_window or {}
     if (not window.get("start") or not window.get("end")) and incidents:
@@ -829,10 +843,49 @@ def _render_host_report(timeline: dict, fleet_window: Optional[dict] = None) -> 
         }
     window_start = window.get("start")
     window_end = window.get("end")
+    action = (host_meta or {}).get("action") or "ok"
+    reasons = (host_meta or {}).get("reasons") or []
+    verdict_map = {"contact": "Contact user", "monitor": "Investigate", "ignore": "OK"}
+    verdict = verdict_map.get(action, "Investigate")
+    if not incidents:
+        reasons = ["No incidents detected"]
+    why_lines = reasons[:2]
+    sorted_incidents = sorted(incidents, key=lambda inc: inc.get("severity", 0), reverse=True)
+    actions: List[str] = []
+    for inc in sorted_incidents:
+        for action_line in inc.get("recommended_actions", []):
+            if action_line not in actions:
+                actions.append(action_line)
+            if len(actions) >= 2:
+                break
+        if len(actions) >= 2:
+            break
+    if not actions:
+        actions = ["None"] if incidents else ["None"]
+    evidence_line = "—"
+    if sorted_incidents:
+        ev = sorted_incidents[0].get("evidence") or []
+        if ev:
+            sample = ev[0]
+            evidence_line = f"{sample.get('ts')} {sample.get('provider')} {sample.get('event_id')} {sample.get('message')}"
     lines = [
         f"# Host report: {timeline.get('host_id', 'unknown')}",
         "",
     ]
+    lines.extend(
+        [
+            "Executive summary",
+            f"Verdict: {verdict}",
+            "Why:",
+        ]
+    )
+    for reason in why_lines or ["No incidents detected"]:
+        lines.append(f"- {reason}")
+    lines.append("Next actions:")
+    for act in actions:
+        lines.append(f"- {act}")
+    lines.append(f"Evidence: {evidence_line}")
+    lines.append("")
     if window_start or window_end:
         lines.append(f"Window: {window_start or ''} -> {window_end or ''}")
         lines.append("")
@@ -841,7 +894,7 @@ def _render_host_report(timeline: dict, fleet_window: Optional[dict] = None) -> 
         return "\n".join(lines)
     lines.append("Incidents:")
     for inc in incidents:
-        title = inc.get("title") or inc.get("summary") or inc.get("type") or "Incident"
+        title = inc.get("summary") or inc.get("title") or inc.get("type") or "Incident"
         lines.append(f"- [{inc.get('severity')}] {title} (type={inc.get('type')}, confidence={inc.get('confidence')})")
         for action in inc.get("recommended_actions", []):
             lines.append(f"  - Action: {action}")
@@ -894,7 +947,8 @@ def run_incident_flow(
     )
     timelines = build_host_timelines(store, run_id, snapshots=snapshots, ticket_prefix=ticket_prefix)
     fleet = build_fleet_summary(run_id, timelines, prev_summary=prev_summary)
-    write_host_artifacts(store, run_id, timelines, fleet_window=fleet.get("window"))
+    host_meta = {h.get("host_id"): h for h in fleet.get("top_hosts", [])}
+    write_host_artifacts(store, run_id, timelines, fleet_window=fleet.get("window"), host_meta=host_meta)
     write_fleet_artifacts(store, run_id, fleet)
     validate_or_raise(store, run_id)
     _append_history(store, fleet)

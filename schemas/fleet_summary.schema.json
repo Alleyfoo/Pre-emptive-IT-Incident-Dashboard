@@ -22,6 +22,7 @@
     "host_count": { "type": "integer", "minimum": 0 },
     "incident_count": { "type": "integer", "minimum": 0 },
     "overall_risk_score": { "$ref": "common.schema.json#/$defs/severity_0_100" },
+    "executive_summary": { "type": "string", "maxLength": 512 },
 
     "top_hosts": {
       "type": "array",

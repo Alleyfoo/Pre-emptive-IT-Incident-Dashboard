@@ -65,3 +65,5 @@ def test_run_without_user_id_passes_schema_validation():
         report = store.read_text(f"{run_id}/hosts/HOST-001/report.md")
         assert "2026-01-01T00:00:00Z" in report
         assert "2026-01-01T12:00:00Z" in report
+        assert "Executive summary" in report
+        assert "None" not in report
