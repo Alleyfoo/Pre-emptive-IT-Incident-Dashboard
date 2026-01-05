@@ -472,27 +472,61 @@ def build_host_timelines(
 ) -> Dict[str, dict]:
     tickets = _load_tickets(store, run_id, ticket_prefix)
     timelines: Dict[str, dict] = {}
+    per_host: Dict[str, List[dict]] = {}
     for snap in snapshots:
         key = snap["key"]
         data = snap["data"]
         host_id = data.get("host_id") or os.path.splitext(os.path.basename(key))[0]
-        window = data.get("window", {"start": data.get("window_start"), "end": data.get("window_end")})
-        events = sorted(data.get("events", []), key=lambda e: e.get("ts", ""))
-        for event in events:
+        per_host.setdefault(host_id, []).append(data)
+
+    for host_id, host_snaps in per_host.items():
+        window = {"start": None, "end": None}
+        merged_events: List[dict] = []
+        user_id: Optional[str] = None
+        for data in host_snaps:
+            snap_window = data.get("window", {"start": data.get("window_start"), "end": data.get("window_end")})
+            if snap_window.get("start") and (window["start"] is None or snap_window["start"] < window["start"]):
+                window["start"] = snap_window["start"]
+            if snap_window.get("end") and (window["end"] is None or snap_window["end"] > window["end"]):
+                window["end"] = snap_window["end"]
+            if user_id is None:
+                user_id = data.get("user_id")
+            merged_events.extend(data.get("events", []))
+
+        merged_events.sort(key=lambda e: e.get("ts", ""))
+        deduped: List[dict] = []
+        seen = set()
+        for event in merged_events:
+            key = (
+                event.get("record_id"),
+                event.get("ts"),
+                event.get("provider"),
+                event.get("event_id"),
+                event.get("message"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
             if "message" in event:
                 event["message"] = _redact_message(event.get("message", ""))
-        incidents = detect_incidents_for_host(host_id, events)
+            deduped.append(event)
+
+        incidents = detect_incidents_for_host(host_id, deduped)
         for incident in incidents:
             incident.id = incident.id or _incident_id(host_id, len(incidents))
+        if window["start"] is None or window["end"] is None:
+            start_ts, end_ts = _summarize_events(deduped)
+            window["start"] = window["start"] or start_ts
+            window["end"] = window["end"] or end_ts
         timeline = {
             "schema_version": "1.0",
             "host_id": host_id,
-            "user_id": _hash_user(data.get("user_id")),
+            "user_id": _hash_user(user_id),
             "window": window,
-            "events": events,
+            "events": deduped,
             "incidents": [_incident_record(host_id, window, inc) for inc in incidents],
             "tickets": tickets.get(host_id, []),
-            "last_event_ts": _latest_ts(events),
+            "last_event_ts": _latest_ts(deduped),
             "severity": _host_severity(incidents),
         }
         timelines[host_id] = timeline
