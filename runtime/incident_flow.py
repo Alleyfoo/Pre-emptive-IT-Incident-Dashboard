@@ -820,7 +820,7 @@ def run_incident_flow(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run incident detection flow against snapshots.")
-    parser.add_argument("--run-id", required=True, help="Run identifier (used for artifacts/<run-id>/...)")
+    parser.add_argument("--run-id", required=False, help="Run identifier (used for artifacts/<run-id>/...). If omitted, a UTC timestamp-based id is generated.")
     parser.add_argument(
         "--artifacts-root",
         default=DEFAULT_ARTIFACTS_ROOT,
@@ -866,19 +866,20 @@ def main() -> None:
         help="Optional safety cap on number of hosts processed (for rollout).",
     )
     args = parser.parse_args()
+    run_id = args.run_id or f"run-{datetime.utcnow().strftime('%Y%m%d-%H%M%SZ')}"
     started_at = _utc_now_iso()
     store = build_artifact_store(args.artifacts_root)
     lock_acquired = False
     break_glass = False
     try:
-        lock_acquired, break_glass = _acquire_lock(store, args.run_id, LOCK_TTL_MINUTES)
+        lock_acquired, break_glass = _acquire_lock(store, run_id, LOCK_TTL_MINUTES)
         if not lock_acquired:
-            _append_shadow(store, args.run_id, "lock", "Another run in progress; exiting")
+            _append_shadow(store, run_id, "lock", "Another run in progress; exiting")
             raise RuntimeError("Worker lock held; exiting")
-        _append_shadow(store, args.run_id, "start", "incident_flow started", break_glass=break_glass)
-        _write_run_status(store, args.run_id, status="running", message="started", started_at=started_at)
+        _append_shadow(store, run_id, "start", "incident_flow started", break_glass=break_glass)
+        _write_run_status(store, run_id, status="running", message="started", started_at=started_at)
         result = run_incident_flow(
-            run_id=args.run_id,
+            run_id=run_id,
             artifacts_root=args.artifacts_root,
             snapshot_root=args.snapshot_root,
             snapshot_prefix=args.snapshot_prefix,
@@ -888,13 +889,13 @@ def main() -> None:
             select_mode=args.select_mode,
             max_hosts=args.max_hosts,
         )
-        _write_run_status(store, args.run_id, status="success", message="completed", started_at=started_at)
-        _append_shadow(store, args.run_id, "done", "incident_flow completed")
+        _write_run_status(store, run_id, status="success", message="completed", started_at=started_at)
+        _append_shadow(store, run_id, "done", "incident_flow completed")
         if result.get("purged_runs"):
-            _append_shadow(store, args.run_id, "retention", "Purged old runs", purged=result["purged_runs"])
+            _append_shadow(store, run_id, "retention", "Purged old runs", purged=result["purged_runs"])
     except Exception as exc:  # noqa: BLE001
-        _write_run_status(store, args.run_id, status="failure", message=str(exc), started_at=started_at)
-        _append_shadow(store, args.run_id, "error", "incident_flow failed", error=str(exc))
+        _write_run_status(store, run_id, status="failure", message=str(exc), started_at=started_at)
+        _append_shadow(store, run_id, "error", "incident_flow failed", error=str(exc))
         raise
     finally:
         if lock_acquired:
