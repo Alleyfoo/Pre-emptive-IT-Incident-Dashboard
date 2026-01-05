@@ -684,19 +684,24 @@ def _load_snapshots(
     cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
     per_host: Dict[str, List[dict]] = {}
     accepted = 0
+    rejected: List[dict] = []
     for key in keys:
         parts = key.split("/")
         if len(parts) < 2:
+            rejected.append({"key": key, "reason": "invalid_path"})
             continue
         host_id = parts[-2]
         filename = parts[-1]
         if not host_pattern.match(host_id):
+            rejected.append({"key": key, "reason": "host_pattern"})
             continue
         if not file_pattern.match(filename):
+            rejected.append({"key": key, "reason": "filename_pattern"})
             continue
         try:
             data = _load_json(snap_store, key)
         except Exception:
+            rejected.append({"key": key, "reason": "schema_fail: load_error"})
             continue
         receipt_ts = data.get("_receipt_time") or None
         window = data.get("window", {})
@@ -706,6 +711,7 @@ def _load_snapshots(
         except Exception:
             end_dt = None
         if end_dt and end_dt < cutoff:
+            rejected.append({"key": key, "reason": "window_out_of_range"})
             continue
         host_id = data.get("host_id") or host_id
         per_host.setdefault(host_id, []).append(
@@ -718,16 +724,28 @@ def _load_snapshots(
         )
         accepted += 1
     selected: List[dict] = []
+    skipped_not_latest = 0
     for host_id, items in per_host.items():
         items.sort(key=lambda item: item["end"], reverse=True)
         if select_mode == "latest" and items:
             selected.append(items[0])
+            skipped_not_latest += max(0, len(items) - 1)
         else:
             selected.extend(items)
     selected.sort(key=lambda item: item["data"].get("host_id", ""))
     if max_hosts is not None:
         selected = selected[:max_hosts]
-    return selected, {"keys_found": len(keys), "hosts_found": len(per_host), "loaded": len(selected), "rejected": len(keys) - accepted}
+    trimmed_rejected = rejected[:10]
+    return (
+        selected,
+        {
+            "keys_found": len(keys),
+            "hosts_found": len(per_host),
+            "loaded": len(selected),
+            "skipped_not_latest": skipped_not_latest,
+            "rejected_samples": trimmed_rejected,
+        },
+    )
 
 
 def purge_old_runs(store: ArtifactStore, retention_hours: int, keep_run: str) -> List[str]:
