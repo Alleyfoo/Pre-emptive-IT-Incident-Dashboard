@@ -628,8 +628,14 @@ def build_fleet_summary(run_id: str, timelines: Dict[str, dict], prev_summary: O
     window = {"start": None, "end": None}
     for timeline in timelines.values():
         w = timeline.get("window") or {}
-        window["start"] = window["start"] or w.get("start")
-        window["end"] = window["end"] or w.get("end")
+        if w.get("start") and (window["start"] is None or w["start"] < window["start"]):
+            window["start"] = w["start"]
+        if w.get("end") and (window["end"] is None or w["end"] > window["end"]):
+            window["end"] = w["end"]
+    if window["start"] is None:
+        window["start"] = _utc_now_iso()
+    if window["end"] is None:
+        window["end"] = window["start"]
     incident_count = sum(len(timeline.get("incidents", [])) for timeline in timelines.values())
     return {
         "schema_version": "1.0",
