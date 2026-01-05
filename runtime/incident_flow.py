@@ -675,8 +675,9 @@ def _load_snapshots(
     window_hours: int,
     select_mode: str,
     max_hosts: Optional[int],
+    external_root: bool = False,
 ) -> List[dict]:
-    prefix = snapshot_prefix or f"{run_id}/snapshots"
+    prefix = snapshot_prefix or ("" if external_root else f"{run_id}/snapshots")
     keys = _list_snapshot_keys(snap_store, prefix)
     host_pattern = re.compile(r"^[A-Za-z0-9._:-]{3,64}$")
     file_pattern = re.compile(r"^snapshot-\d{8}T\d{6}Z\.json$")
@@ -806,7 +807,28 @@ def run_incident_flow(
     snapshot_store = build_artifact_store(snapshot_root) if snapshot_root else store
     history = _load_history(store)
     prev_summary = _previous_summary(history)
-    snapshots = _load_snapshots(snapshot_store, run_id, snapshot_prefix, window_hours, select_mode, max_hosts)
+    snapshots = _load_snapshots(
+        snapshot_store,
+        run_id,
+        snapshot_prefix,
+        window_hours,
+        select_mode,
+        max_hosts,
+        external_root=bool(snapshot_root),
+    )
+    _append_shadow(
+        store,
+        run_id,
+        "ingest",
+        "Loaded snapshots",
+        meta={
+            "snapshot_root": snapshot_root or artifacts_root,
+            "prefix": snapshot_prefix or ("" if snapshot_root else f"{run_id}/snapshots"),
+            "keys_found": len(_list_snapshot_keys(snapshot_store, snapshot_prefix or ("" if snapshot_root else f"{run_id}/snapshots"))),
+            "hosts_found": len({s.get("data", {}).get("host_id") for s in snapshots}),
+            "loaded": len(snapshots),
+        },
+    )
     timelines = build_host_timelines(store, run_id, snapshots=snapshots, ticket_prefix=ticket_prefix)
     fleet = build_fleet_summary(run_id, timelines, prev_summary=prev_summary)
     write_host_artifacts(store, run_id, timelines)
