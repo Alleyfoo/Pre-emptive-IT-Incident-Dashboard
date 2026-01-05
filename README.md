@@ -1,5 +1,5 @@
 # Pre-emptive IT Incident Dashboard
-
+Ops/Observability automation: endpoint-snapshot → incident-detect → priorising → raporting.
 Artifact-first incident pipeline: ingest endpoint snapshots, detect incidents with deterministic rules, write reproducible artifacts, and surface a Streamlit dashboard (fleet + host). Runs locally or on GCP (Cloud Run service + job) with GCS-backed storage.
 
 ## Quickstart (local)
