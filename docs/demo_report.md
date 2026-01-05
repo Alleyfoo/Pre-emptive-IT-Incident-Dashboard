@@ -5,6 +5,7 @@
 
 ## Executive summary
 - Verdict: Contact user
+- Window: 2026-01-05T14:11:58Z -> 2026-01-05T14:41:58Z
 - Why: disk_full (sev 70); network_instability (sev 65)
 - Next actions: Clear temp folders and large caches.; Reset adapter and DNS cache, verify driver version.
 - Evidence: 2026-01-05T14:41:58Z Disk 2019 disk full: C: volume at 99%, write failures, temp/profile cannot expand

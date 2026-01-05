@@ -876,6 +876,7 @@ def _render_host_report(timeline: dict, fleet_window: Optional[dict] = None, hos
         [
             "Executive summary",
             f"Verdict: {verdict}",
+            f"Window: {window_start or 'unknown'} -> {window_end or 'unknown'}",
             "Why:",
         ]
     )
