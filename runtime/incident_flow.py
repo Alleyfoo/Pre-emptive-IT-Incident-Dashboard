@@ -555,15 +555,15 @@ def _top_hosts(timelines: Dict[str, dict], limit: int = 10) -> List[dict]:
     for host_id, timeline in timelines.items():
         incident_refs = [inc.get("incident_id") for inc in timeline.get("incidents", []) if inc.get("incident_id")]
         reasons = [f"{inc.get('type')} (sev {inc.get('severity')})" for inc in timeline.get("incidents", [])]
-        hosts.append(
-            {
-                "host_id": host_id,
-                "user_id": timeline.get("user_id"),
-                "score": timeline.get("severity", 0),
-                "reasons": reasons,
-                "incident_refs": incident_refs,
-            }
-        )
+        record = {
+            "host_id": host_id,
+            "score": timeline.get("severity", 0),
+            "reasons": reasons,
+            "incident_refs": incident_refs,
+        }
+        if timeline.get("user_id"):
+            record["user_id"] = timeline.get("user_id")
+        hosts.append(record)
     hosts.sort(key=lambda h: (h["score"], len(h.get("incident_refs", []))), reverse=True)
     return hosts[:limit]
 
@@ -683,6 +683,7 @@ def _load_snapshots(
     file_pattern = re.compile(r"^snapshot-\d{8}T\d{6}Z\.json$")
     cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
     per_host: Dict[str, List[dict]] = {}
+    accepted = 0
     for key in keys:
         parts = key.split("/")
         if len(parts) < 2:
@@ -715,6 +716,7 @@ def _load_snapshots(
                 "receipt": _parse_ts(receipt_ts) if receipt_ts else datetime.now(timezone.utc),
             }
         )
+        accepted += 1
     selected: List[dict] = []
     for host_id, items in per_host.items():
         items.sort(key=lambda item: item["end"], reverse=True)
@@ -725,7 +727,7 @@ def _load_snapshots(
     selected.sort(key=lambda item: item["data"].get("host_id", ""))
     if max_hosts is not None:
         selected = selected[:max_hosts]
-    return selected
+    return selected, {"keys_found": len(keys), "hosts_found": len(per_host), "loaded": len(selected), "rejected": len(keys) - accepted}
 
 
 def purge_old_runs(store: ArtifactStore, retention_hours: int, keep_run: str) -> List[str]:
@@ -807,7 +809,7 @@ def run_incident_flow(
     snapshot_store = build_artifact_store(snapshot_root) if snapshot_root else store
     history = _load_history(store)
     prev_summary = _previous_summary(history)
-    snapshots = _load_snapshots(
+    snapshots, ingest_meta = _load_snapshots(
         snapshot_store,
         run_id,
         snapshot_prefix,
@@ -824,9 +826,7 @@ def run_incident_flow(
         meta={
             "snapshot_root": snapshot_root or artifacts_root,
             "prefix": snapshot_prefix or ("" if snapshot_root else f"{run_id}/snapshots"),
-            "keys_found": len(_list_snapshot_keys(snapshot_store, snapshot_prefix or ("" if snapshot_root else f"{run_id}/snapshots"))),
-            "hosts_found": len({s.get("data", {}).get("host_id") for s in snapshots}),
-            "loaded": len(snapshots),
+            **ingest_meta,
         },
     )
     timelines = build_host_timelines(store, run_id, snapshots=snapshots, ticket_prefix=ticket_prefix)
