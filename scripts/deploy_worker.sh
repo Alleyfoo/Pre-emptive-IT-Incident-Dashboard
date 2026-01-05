@@ -18,7 +18,7 @@ gcloud run jobs create incident-worker \
   --service-account "${WORKER_SA}" \
   --set-env-vars ARTIFACTS_ROOT="gs://${BUCKET}/artifacts" \
   --command sh \
-  --args "-c","RUN_ID=run-\$(date -u +%Y%m%d-%H%M); python -m runtime.incident_flow --run-id \$RUN_ID --artifacts-root gs://${BUCKET}/artifacts" \
+  --args "-c","python -m runtime.incident_flow --artifacts-root gs://${BUCKET}/artifacts" \
   --max-retries 1
 
-echo "Worker job created; run_id will be run-<YYYYMMDD-HHMM> at execution time."
+echo "Worker job created; run_id will auto-generate per execution."

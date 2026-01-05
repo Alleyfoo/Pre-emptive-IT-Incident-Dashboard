@@ -866,7 +866,7 @@ def main() -> None:
         help="Optional safety cap on number of hosts processed (for rollout).",
     )
     args = parser.parse_args()
-    run_id = args.run_id or f"run-{datetime.utcnow().strftime('%Y%m%d-%H%M%SZ')}"
+    run_id = args.run_id or f"run-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
     started_at = _utc_now_iso()
     store = build_artifact_store(args.artifacts_root)
     lock_acquired = False
