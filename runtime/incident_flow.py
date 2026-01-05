@@ -819,7 +819,14 @@ def write_host_artifacts(store: ArtifactStore, run_id: str, timelines: Dict[str,
 
 
 def _render_host_report(timeline: dict, fleet_window: Optional[dict] = None) -> str:
+    incidents = timeline.get("incidents", [])
     window = timeline.get("window") or fleet_window or {}
+    if (not window.get("start") or not window.get("end")) and incidents:
+        inc_window = incidents[0].get("window", {})
+        window = {
+            "start": window.get("start") or inc_window.get("start"),
+            "end": window.get("end") or inc_window.get("end"),
+        }
     window_start = window.get("start")
     window_end = window.get("end")
     lines = [
@@ -829,13 +836,13 @@ def _render_host_report(timeline: dict, fleet_window: Optional[dict] = None) -> 
     if window_start or window_end:
         lines.append(f"Window: {window_start or ''} -> {window_end or ''}")
         lines.append("")
-    incidents = timeline.get("incidents", [])
     if not incidents:
         lines.append("No incidents detected.")
         return "\n".join(lines)
     lines.append("Incidents:")
     for inc in incidents:
-        lines.append(f"- [{inc.get('severity')}] {inc.get('title')} (type={inc.get('type')}, confidence={inc.get('confidence')})")
+        title = inc.get("title") or inc.get("summary") or inc.get("type") or "Incident"
+        lines.append(f"- [{inc.get('severity')}] {title} (type={inc.get('type')}, confidence={inc.get('confidence')})")
         for action in inc.get("recommended_actions", []):
             lines.append(f"  - Action: {action}")
         if inc.get("evidence"):

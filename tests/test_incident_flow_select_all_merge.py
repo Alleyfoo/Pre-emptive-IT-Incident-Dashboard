@@ -79,3 +79,7 @@ def test_select_mode_all_merges_snapshots_per_host():
         assert timeline["window"]["end"] == "2026-01-01T18:00:00Z"
         assert len(timeline["events"]) == 2
         assert len(timeline["incidents"]) >= 2
+
+        report = store.read_text(f"{run_id}/hosts/HOST-001/report.md")
+        assert "2026-01-01T00:00:00Z" in report
+        assert "Disk usage approaching capacity" in report or "disk_full" in report
