@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/run_manifest.schema.json",
+  "title": "Run manifest (reproducibility + audit)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "created_at", "window", "inputs", "outputs"],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["1.0"] },
+    "run_id": { "type": "string", "minLength": 3, "maxLength": 128 },
+    "created_at": { "$ref": "common.schema.json#/$defs/iso8601" },
+    "window": { "$ref": "common.schema.json#/$defs/window" },
+
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "maxLength": 128 },
+        "version": { "type": "string", "maxLength": 64 },
+        "seed": { "type": "integer" }
+      },
+      "default": {}
+    },
+    "scenario_tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "default": []
+    },
+
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": { "type": "string", "maxLength": 64 },
+          "path": { "type": "string", "maxLength": 1024 }
+        }
+      },
+      "default": []
+    },
+
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": { "type": "string", "maxLength": 64 },
+          "path": { "type": "string", "maxLength": 1024 }
+        }
+      },
+      "default": []
+    }
+  }
+}

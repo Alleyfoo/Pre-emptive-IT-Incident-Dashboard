@@ -12,4 +12,4 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "streamlit run demos/streamlit_app.py --server.port=${PORT} --server.address=0.0.0.0"]
+CMD ["sh", "-c", "streamlit run demos/streamlit_incident_dashboard.py --server.port=${PORT} --server.address=0.0.0.0"]

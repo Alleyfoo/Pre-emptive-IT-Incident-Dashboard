@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/incident.schema.json",
+  "title": "Detected incident on a host",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "incident_id",
+    "host_id",
+    "type",
+    "window",
+    "severity",
+    "confidence",
+    "summary",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["1.0"] },
+    "incident_id": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "host_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+
+    "type": {
+      "type": "string",
+      "enum": [
+        "bsod",
+        "unexpected_shutdown",
+        "disk_errors",
+        "disk_full",
+        "network_instability",
+        "dns_failures",
+        "tls_schannel",
+        "update_failure",
+        "service_crash_loop",
+        "app_crash_loop",
+        "auth_failures",
+        "other"
+      ]
+    },
+
+    "window": { "$ref": "common.schema.json#/$defs/window" },
+    "detected_at": { "$ref": "common.schema.json#/$defs/iso8601" },
+
+    "severity": { "$ref": "common.schema.json#/$defs/severity_0_100" },
+    "confidence": { "$ref": "common.schema.json#/$defs/confidence_0_1" },
+
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+
+    "signature": {
+      "type": "object",
+      "description": "Stable-ish key for clustering similar incidents across hosts.",
+      "additionalProperties": false,
+      "required": ["signature_key", "signature_hash"],
+      "properties": {
+        "signature_key": {
+          "type": "string",
+          "description": "Human-readable template (e.g., 'BugCheck:0x00000124').",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "signature_hash": {
+          "type": "string",
+          "description": "Hash of signature_key + normalization fields (hex or base64url).",
+          "minLength": 8,
+          "maxLength": 128
+        }
+      }
+    },
+
+    "recommended_actions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 },
+      "default": []
+    },
+
+    "evidence": {
+      "type": "array",
+      "description": "Pointers to supporting events (minimum required: timestamp + provider + message).",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ts", "provider", "level", "message"],
+        "properties": {
+          "ts": { "$ref": "common.schema.json#/$defs/iso8601" },
+          "level": { "type": "string", "enum": ["Critical", "Error", "Warning", "Information", "Verbose"] },
+          "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "event_id": { "oneOf": [{ "type": "integer" }, { "type": "string" }] },
+          "source": { "type": "string", "maxLength": 128 },
+          "record_id": { "type": "integer" },
+          "message": { "type": "string", "minLength": 1, "maxLength": 4000 }
+        }
+      }
+    },
+
+    "tags": { "$ref": "common.schema.json#/$defs/tags" }
+  }
+}

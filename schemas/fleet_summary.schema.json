@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/fleet_summary.schema.json",
+  "title": "Fleet summary for a run window",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "generated_at",
+    "window",
+    "host_count",
+    "top_hosts",
+    "clusters"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["1.0"] },
+    "run_id": { "type": "string", "minLength": 3, "maxLength": 128 },
+    "generated_at": { "$ref": "common.schema.json#/$defs/iso8601" },
+    "window": { "$ref": "common.schema.json#/$defs/window" },
+
+    "host_count": { "type": "integer", "minimum": 0 },
+    "incident_count": { "type": "integer", "minimum": 0 },
+    "overall_risk_score": { "$ref": "common.schema.json#/$defs/severity_0_100" },
+
+    "top_hosts": {
+      "type": "array",
+      "description": "Ranked hosts to contact / investigate.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["host_id", "score", "reasons"],
+        "properties": {
+          "host_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "user_id": { "type": "string", "maxLength": 320 },
+          "score": { "$ref": "common.schema.json#/$defs/severity_0_100" },
+          "reasons": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "default": []
+          },
+          "incident_refs": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 8, "maxLength": 128 },
+            "default": []
+          },
+          "action": { "type": "string", "enum": ["contact", "monitor", "ignore"], "default": "ignore" },
+          "delta_score": { "type": ["integer", "null"] },
+          "action_reason": { "type": "string", "maxLength": 256 }
+        }
+      },
+      "default": []
+    },
+
+    "clusters": {
+      "type": "array",
+      "description": "Cross-host incident clusters (same signature across many hosts).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["signature_hash", "signature_key", "type", "affected_hosts", "first_seen", "last_seen", "severity"],
+        "properties": {
+          "signature_hash": { "type": "string", "minLength": 8, "maxLength": 128 },
+          "signature_key": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "type": { "type": "string" },
+          "affected_hosts": { "type": "integer", "minimum": 1 },
+          "first_seen": { "$ref": "common.schema.json#/$defs/iso8601" },
+          "last_seen": { "$ref": "common.schema.json#/$defs/iso8601" },
+          "severity": { "$ref": "common.schema.json#/$defs/severity_0_100" },
+          "status": { "type": "string", "enum": ["new", "ongoing", "spiking"] },
+          "delta_affected_hosts": { "type": ["integer", "null"] },
+          "example_hosts": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "maxItems": 20,
+            "default": []
+          },
+          "notes": { "type": "string", "maxLength": 2000 }
+        }
+      },
+      "default": []
+    },
+
+    "meta": {
+      "type": "object",
+      "description": "Optional run metadata for debugging/reporting.",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string", "maxLength": 2000 },
+          { "type": "number" },
+          { "type": "integer" },
+          { "type": "boolean" },
+          { "type": "null" }
+        ]
+      },
+      "default": {}
+    }
+  }
+}

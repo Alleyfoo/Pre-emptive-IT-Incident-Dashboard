@@ -1,4 +1,6 @@
 import os
+import json
+import shutil
 from typing import List, Optional
 
 
@@ -26,9 +28,39 @@ class ArtifactStore:
     def list(self, prefix: str = "") -> List[str]:
         raise NotImplementedError
 
+    def list_prefix(self, prefix: str = "") -> List[str]:
+        return self.list(prefix)
+
     def uri_for_key(self, key: str) -> str:
         """
         Returns a fully qualified URI for the key when available (gs://... for GCS, file:// for local).
+        """
+        raise NotImplementedError
+
+    def read_json(self, key: str) -> dict:
+        return json.loads(self.read_text(key))
+
+    def write_json(self, key: str, payload: dict, content_type: Optional[str] = "application/json") -> None:
+        self.write_text(key, json.dumps(payload, indent=2, ensure_ascii=True), content_type=content_type)
+
+    def list_runs(self) -> List[str]:
+        raise NotImplementedError
+
+    def delete_prefix(self, prefix: str) -> None:
+        raise NotImplementedError
+
+    def run_exists(self, run_id: str) -> bool:
+        raise NotImplementedError
+
+    def put_bytes(self, key: str, data: bytes, content_type: Optional[str] = None) -> None:
+        self.write_bytes(key, data, content_type=content_type)
+
+    def get_bytes(self, key: str) -> bytes:
+        return self.read_bytes(key)
+
+    def create_if_absent(self, key: str, data: bytes, content_type: Optional[str] = None) -> bool:
+        """
+        Create key only if it does not exist. Returns True if created, False if already exists.
         """
         raise NotImplementedError
 
@@ -83,11 +115,43 @@ class LocalArtifactStore(ArtifactStore):
     def uri_for_key(self, key: str) -> str:
         return f"file://{self._path(key)}"
 
+    def list_runs(self) -> List[str]:
+        runs: List[str] = []
+        if not os.path.exists(self.root_dir):
+            return runs
+        for entry in os.listdir(self.root_dir):
+            path = os.path.join(self.root_dir, entry)
+            if os.path.isdir(path):
+                runs.append(entry)
+        return sorted(runs)
+
+    def delete_prefix(self, prefix: str) -> None:
+        target = self._path(prefix)
+        if os.path.isdir(target):
+            shutil.rmtree(target, ignore_errors=True)
+        elif os.path.exists(target):
+            os.remove(target)
+
+    def run_exists(self, run_id: str) -> bool:
+        return os.path.isdir(self._path(run_id))
+
+    def create_if_absent(self, key: str, data: bytes, content_type: Optional[str] = None) -> bool:
+        path = self._path(key)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+            return True
+        except FileExistsError:
+            return False
+
 
 class GCSArtifactStore(ArtifactStore):
     def __init__(self, bucket: str, prefix: str = "", client=None):
         try:
             from google.cloud import storage
+            from google.api_core import exceptions as gcs_exceptions
         except Exception as exc:  # pragma: no cover - import guard
             raise ImportError("google-cloud-storage is required for GCSArtifactStore") from exc
 
@@ -95,6 +159,7 @@ class GCSArtifactStore(ArtifactStore):
         self.prefix = prefix.strip("/")
         self.client = client or storage.Client()
         self.bucket = self.client.bucket(self.bucket_name)
+        self._gcs_exceptions = gcs_exceptions
 
     def _full_key(self, key: str) -> str:
         normalized = key.lstrip("/")
@@ -140,6 +205,34 @@ class GCSArtifactStore(ArtifactStore):
     def uri_for_key(self, key: str) -> str:
         full_key = self._full_key(key)
         return f"gs://{self.bucket_name}/{full_key}"
+
+    def list_runs(self) -> List[str]:
+        runs: set = set()
+        blobs = self.client.list_blobs(self.bucket, prefix=self._full_key(""))
+        for blob in blobs:
+            name = self._strip_prefix(blob.name)
+            if "/" in name:
+                runs.add(name.split("/", 1)[0])
+        return sorted(list(runs))
+
+    def delete_prefix(self, prefix: str) -> None:
+        full_prefix = self._full_key(prefix)
+        blobs = list(self.client.list_blobs(self.bucket, prefix=full_prefix))
+        if blobs:
+            self.bucket.delete_blobs(blobs)
+
+    def run_exists(self, run_id: str) -> bool:
+        full_prefix = self._full_key(run_id)
+        iterator = self.client.list_blobs(self.bucket, prefix=full_prefix, max_results=1)
+        return any(True for _ in iterator)
+
+    def create_if_absent(self, key: str, data: bytes, content_type: Optional[str] = None) -> bool:
+        blob = self.bucket.blob(self._full_key(key))
+        try:
+            blob.upload_from_string(data, content_type=content_type or "application/octet-stream", if_generation_match=0)
+            return True
+        except self._gcs_exceptions.PreconditionFailed:
+            return False
 
 
 def is_gcs_uri(uri: str) -> bool:

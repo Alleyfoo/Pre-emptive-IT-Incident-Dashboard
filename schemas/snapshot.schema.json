@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/snapshot.schema.json",
+  "title": "Endpoint 24h snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "snapshot_id", "host_id", "window", "generated_at", "events"],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["1.0"] },
+    "snapshot_id": {
+      "type": "string",
+      "description": "Unique ID for this snapshot (e.g., host_id + window).",
+      "minLength": 8,
+      "maxLength": 128
+    },
+    "host_id": {
+      "type": "string",
+      "description": "Canonical device identifier (hostname, asset id, or GUID).",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "user_id": {
+      "type": "string",
+      "description": "Optional primary user (UPN/email) if available.",
+      "maxLength": 320
+    },
+    "generated_at": { "$ref": "common.schema.json#/$defs/iso8601" },
+    "window": { "$ref": "common.schema.json#/$defs/window" },
+
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hostname": { "type": "string", "maxLength": 256 },
+        "domain": { "type": "string", "maxLength": 256 },
+        "os_name": { "type": "string", "maxLength": 128 },
+        "os_version": { "type": "string", "maxLength": 128 },
+        "build": { "type": "string", "maxLength": 64 },
+        "manufacturer": { "type": "string", "maxLength": 128 },
+        "model": { "type": "string", "maxLength": 128 }
+      },
+      "default": {}
+    },
+
+    "collector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "maxLength": 128 },
+        "version": { "type": "string", "maxLength": 64 },
+        "method": {
+          "type": "string",
+          "description": "How data was collected (local_script, winrm, intune_export, edr_api, simulated).",
+          "enum": ["local_script", "winrm", "intune_export", "edr_api", "simulated", "other"]
+        }
+      },
+      "default": {}
+    },
+
+    "filters": {
+      "type": "object",
+      "description": "What was included/excluded (so we can interpret missing data).",
+      "additionalProperties": false,
+      "properties": {
+        "levels": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["Critical", "Error", "Warning", "Information", "Verbose"] },
+          "default": ["Critical", "Error"]
+        },
+        "providers_allowlist": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 128 },
+          "default": []
+        }
+      },
+      "default": {}
+    },
+
+    "events": {
+      "type": "array",
+      "items": { "$ref": "event.schema.json" },
+      "default": []
+    },
+
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "event_count": { "type": "integer", "minimum": 0 },
+        "critical_count": { "type": "integer", "minimum": 0 },
+        "error_count": { "type": "integer", "minimum": 0 },
+        "warning_count": { "type": "integer", "minimum": 0 }
+      },
+      "default": {}
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/ticket.schema.json",
+  "title": "Support ticket (simulated or real)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ticket_id", "source", "created_at", "host_id", "subject", "body"],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["1.0"] },
+    "ticket_id": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "source": { "type": "string", "enum": ["simulated", "portal", "email", "phone", "other"] },
+    "created_at": { "$ref": "common.schema.json#/$defs/iso8601" },
+
+    "host_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "user_id": { "type": "string", "maxLength": 320 },
+
+    "subject": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "body": { "type": "string", "minLength": 1, "maxLength": 8000 },
+
+    "reported_window": {
+      "description": "If the reporter gave an approximate time range.",
+      "anyOf": [
+        { "$ref": "common.schema.json#/$defs/window" },
+        { "type": "null" }
+      ],
+      "default": null
+    },
+
+    "symptoms": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "default": []
+    },
+
+    "truth": {
+      "type": "object",
+      "description": "Only for simulator/validation. Never include for real tickets.",
+      "additionalProperties": false,
+      "properties": {
+        "expects_incident_types": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "expects_clustered_outage": { "type": "boolean", "default": false }
+      },
+      "default": {}
+    }
+  }
+}

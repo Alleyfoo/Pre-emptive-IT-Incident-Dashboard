@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/common.schema.json",
+  "title": "Common schema helpers",
+  "type": "object",
+  "$defs": {
+    "iso8601": {
+      "type": "string",
+      "description": "ISO 8601 timestamp, ideally with timezone (e.g., 2026-01-05T08:15:30Z).",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "$ref": "#/$defs/iso8601" },
+        "end": { "$ref": "#/$defs/iso8601" }
+      }
+    },
+    "severity_0_100": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "confidence_0_1": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[a-z0-9_\\-\\.]+$"
+      },
+      "uniqueItems": true,
+      "default": []
+    }
+  }
+}

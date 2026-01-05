@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  worker:
+    build: .
+    command: >
+      sh -c "python -m tools.generate_ticket_scenarios --run-id demo --seed 123 --n-hosts 12 --artifacts-root /artifacts
+      && python -m runtime.incident_flow --run-id demo --artifacts-root /artifacts
+      && python -m tools.validate --run-id demo --artifacts-root /artifacts"
+    environment:
+      - ARTIFACTS_ROOT=/artifacts
+    volumes:
+      - artifacts:/artifacts
+    restart: "no"
+
+  dashboard:
+    build: .
+    command: >
+      sh -c "streamlit run demos/streamlit_incident_dashboard.py --server.port=${PORT:-8501} --server.address=0.0.0.0"
+    environment:
+      - ARTIFACTS_ROOT=/artifacts
+      - PORT=8501
+    ports:
+      - "8501:8501"
+    volumes:
+      - artifacts:/artifacts
+    depends_on:
+      - worker
+    restart: unless-stopped
+
+  simulator:
+    build: .
+    command: >
+      sh -c "python -m tools.generate_ticket_scenarios --run-id demo --seed 321 --n-hosts 8 --artifacts-root /artifacts"
+    environment:
+      - ARTIFACTS_ROOT=/artifacts
+    volumes:
+      - artifacts:/artifacts
+    restart: "no"
+    profiles:
+      - simulator
+
+volumes:
+  artifacts:

@@ -1,120 +1,53 @@
-# Data Agents Demo
+# Pre-emptive IT Incident Dashboard
 
-Agentic Excel/CSV cleaner: finds the right header row, normalizes fields, and writes a clean schema plus CSV output. Ships with a CLI, a TUI, and Streamlit UIs. GitHub home: https://github.com/Alleyfoo/Data-agents-demo
+Artifact-first incident pipeline: ingest endpoint snapshots, detect incidents with deterministic rules, write reproducible artifacts, and surface a Streamlit dashboard (fleet + host). Runs locally or on GCP (Cloud Run service + job) with GCS-backed storage.
 
-## Quickstart (CLI)
+## Quickstart (local)
 
-Prereqs: Python 3.11+, git, and pip. Commands assume PowerShell from the repo root.
+Prereqs: Python 3.11+, git, pip.
 
 ```powershell
 python -m venv .venv
-.\\.venv\\Scripts\\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 python -m pip install -r demos/requirements-demo.txt
 
-# Try the included sample
-python data_agents_cli.py run --input data/samples/sample_mini.csv --run-id demo --interactive
+# Generate synthetic data, run worker, validate
+python -m tools.generate_ticket_scenarios --run-id demo
+python -m runtime.incident_flow --run-id demo
+python -m tools.validate --run-id demo
 
-# Or point to your own file (prompts if header confirmation is needed)
-python data_agents_cli.py run --input path\\to\\your.xlsx --run-id demo --interactive
-
-# Or the two-step flow
-python data_agents_cli.py run --input path\\to\\your.xlsx --run-id demo
-python data_agents_cli.py confirm --run-id demo --choice row_1
-python data_agents_cli.py resume --run-id demo
+# Dashboard
+streamlit run demos/streamlit_incident_dashboard.py
 ```
 
-Outputs land in `artifacts/<run-id>/`, including `clean.csv`, `schema_spec.json`, and the shadow log. Use your own CSV/XLSX; drop it anywhere and point `--input` to the file. A small sample like `data/samples/sample_messy.xlsx` works if you already have it locally.
+Artifacts land in `artifacts/<run-id>/` (fleet_summary.json, host timelines/reports, run_status.json, latest_run.txt).
 
-## UI options
+## Docker / Compose
 
-- TUI: `python demos/tui_app.py --input path\\to\\your.xlsx --interactive`
-- Streamlit demo: `streamlit run demos/streamlit_app.py`
-- Streamlit mapping studio: `streamlit run demos/streamlit_mapping_studio.py`
-- Convenience launchers (Windows): `demos/run_tui_demo.bat`, `demos/run_streamlit_demo.bat`
+Single image runs the dashboard by default. One-command local stack:
 
-## Local vs Cloud
-
-- Local dev: leave `ARTIFACTS_ROOT` unset to default to `./artifacts`; install with `pip install -r demos/requirements-demo.txt`; run `streamlit run demos/streamlit_app.py`.
-- Cloud Storage: set `ARTIFACTS_ROOT=gs://your-bucket/artifacts` and run the CLI or Streamlit apps; artifacts are written via the storage abstraction instead of container paths.
-- Cloud Run: build with the provided `Dockerfile` and deploy with `gcloud run deploy ... --set-env-vars ARTIFACTS_ROOT=gs://your-bucket/artifacts`; the app binds to `$PORT` on `0.0.0.0`.
-- Demo /tmp mode: without GCS, set `ARTIFACTS_ROOT=/tmp/artifacts` and `UPLOADS_DIR=/tmp/uploads`, and keep Cloud Run Max instances = 1 (to avoid runs splitting across instances).
-- Inputs are copied into the artifact store, so resume checks don’t depend on container-local paths.
-- Buildpacks: root `requirements.txt` (points to `demos/requirements-demo.txt`) and `Procfile` start Streamlit correctly for Cloud Run buildpacks.
-- Manual: see `CloudRun_MappingStudio_Manual_v0_2.docx` for a screenshot-driven deploy + usage guide (Console buildpacks flow, header mapping, outputs, troubleshooting).
-
-## What this demo does
-
-- Detects likely header rows and asks for confirmation when ambiguous.
-- Cleans and normalizes column names and data values.
-- Writes reproducible artifacts (schema, evidence packet, shadow log, clean CSV) under `artifacts/`.
-- Designed to plug in alternative UIs without changing the core runtime in `runtime/`.
-
-## How it works (fast walk-through)
-
-```
-Your CSV/XLSX
-   │
-   ▼
-runtime.excel_flow.puhemies_run_from_file
-   ├─ Detect header candidates → evidence_packet.json
-   ├─ If ambiguous → header_spec.json → CLI/TUI/Streamlit asks you
-   ├─ You confirm → human_confirmation.json
-   ├─ Orchestrator resumes → cleans/normalizes data
-   └─ Writes outputs:
-        • clean.csv
-        • schema_spec.json (normalized headers/field types)
-        • shadow.jsonl (trace log)
+```bash
+docker compose up --build
 ```
 
-Why this is more than “just read Excel”:
-- The pipeline treats header detection as a first-class decision, not a guess hidden inside a parser.
-- Human confirmations are recorded, so runs are reproducible and auditable.
-- UIs are thin shells; the orchestration and janitor live in `runtime/`, so you can swap interfaces without touching the core.
-- Artifacts are structured (JSON + CSV) for downstream pipelines, not screenshots or ad-hoc prints.
+Worker uses the same image (override command/args) to generate scenarios, run incident flow, and validate. Bind `/artifacts` volume or set `ARTIFACTS_ROOT=gs://...`.
 
-## Under the hood (where to look)
+## Cloud Run (service + job)
 
-- Orchestration: `runtime/excel_flow.py` — `puhemies_run_from_file` (initial detection), `puhemies_continue` (after confirmation), `_write_json` and `_append_shadow` (artifact + audit log writers).
-- Header detection: `_normalize_header`, `_header_looks_like_data`, and candidate generation inside `excel_flow.py`; scores candidates, marks ambiguous cases, and serializes to `header_spec.json`.
-- Human-in-the-loop: `data_agents_cli.py` (CLI), `demos/tui_app.py` (text UI), `demos/streamlit_app.py` & `demos/streamlit_mapping_studio.py` (web UI). All simply surface the same `header_spec.json` question and call `write_human_confirmation`.
-- Data cleaning: `runtime/data_janitor.py` — `clean_value`, `clean_series` for stripping whitespace, normalizing numeric-ish strings, and handling nulls before writing `clean.csv`.
-- Schema + evidence: `schema_spec.json` and `evidence_packet.json` come from the run; they capture normalized headers, confidence scores, and decisions so you can replay/debug.
+- Dashboard (Cloud Run service, IAM-only): `ARTIFACTS_ROOT=gs://<bucket>/artifacts`.
+- Worker (Cloud Run job): `ARTIFACTS_ROOT=gs://<bucket>/artifacts`, optional `--snapshot-root gs://<bucket>/snapshots` for real snapshots; writes latest_run.txt only on success, with run_status.json and retention purge.
+- Scheduler: Cloud Scheduler trigger to execute the job on cadence.
 
-### UI → runtime → artifacts (code map)
+Docs: `docs/DEPLOY_CLOUD_RUN.md` (quick) and `docs/DEPLOY_PRODUCTION.md` (IAM, lifecycle, scheduler).
 
-```
-CLI/TUI/Streamlit
-   │ calls
-   ▼
-runtime.excel_flow.puhemies_run_from_file
-   ├─ _build_header_candidates → header_spec.json
-   ├─ _append_shadow           → shadow.jsonl (event log)
-   ├─ write_human_confirmation → human_confirmation.json (after you pick a header)
-   ├─ puhemies_continue        → re-loads confirmation + cleans data
-   ├─ _infer_dtype/clean_series → schema_spec.json, clean.csv
-   └─ _write_json              → evidence_packet.json, save_manifest.json
-```
+## Ingest paths
 
-## Agent philosophy (why it works this way)
+- Synthetic: `tools/generate_ticket_scenarios.py`.
+- Real snapshots: upload schema-compliant `snapshots/<host_id>/snapshot-<ts>.json`; run worker in snapshot mode.
+- Reference collector: `collector/snapshot.ps1` (Windows event logs → snapshot.json).
 
-- Decisions are explicit: the orchestrator asks for human confirmation when header confidence is low, then records that choice in artifacts so runs are reproducible.
-- Separation of concerns: runtime logic lives in `runtime/` (detection, cleaning, orchestration) while UIs (CLI/TUI/Streamlit) are thin shells that just prompt and display.
-- Traceability by default: every step writes to `shadow.jsonl` and structured specs so you can audit or replay without hidden state.
-- Extensible roles: canonical agent/skill definitions live under `agent-base/` (mirrored in `.github/`) if you want to plug this into a larger multi-agent workflow.
+## Security/ops defaults
 
-## Repo layout
-
-- `data_agents_cli.py` / `data-agents.ps1` — CLI entrypoint and PowerShell wrapper.
-- `runtime/` — header detection, janitor, and orchestration logic.
-- `demos/` — TUI and Streamlit front-ends plus demo requirements.
-- `tests/` — basic flow coverage.
-- `agent-base/` and `.github/` — shared agent definitions and templates.
-
-## Example output
-
-- Clean CSV from the bundled sample: `docs/example-output/sample_mini_clean.csv`
-
-## Links
-
-- Profile: https://github.com/Alleyfoo
-- Related: https://github.com/Alleyfoo/Data-tool-demo
+- Schema validation on every run; redaction modes (`REDACTION_MODE=strict|balanced|off`) and evidence truncation.
+- Run locking (GCS/local) to avoid overlap; retention purge respects pinned runs.
+- Run status artifacts + latest run pointer for dashboard autodiscovery.

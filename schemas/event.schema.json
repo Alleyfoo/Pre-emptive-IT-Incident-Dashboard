@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/event.schema.json",
+  "title": "Normalized endpoint event record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ts", "level", "source", "provider", "message"],
+  "properties": {
+    "ts": { "$ref": "common.schema.json#/$defs/iso8601" },
+    "level": {
+      "type": "string",
+      "enum": ["Critical", "Error", "Warning", "Information", "Verbose"]
+    },
+    "source": {
+      "type": "string",
+      "description": "Origin of the record (e.g., WindowsEventLog:System, WindowsEventLog:Application, ReliabilityMonitor).",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "channel": {
+      "type": "string",
+      "description": "If Windows Event Log, the channel (System/Application/Security/Setup/etc.).",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "event_id": {
+      "description": "Provider event id (numeric or string for non-Windows sources).",
+      "oneOf": [{ "type": "integer" }, { "type": "string", "minLength": 1, "maxLength": 64 }]
+    },
+    "record_id": {
+      "type": "integer",
+      "description": "Windows Event Record ID (if available)."
+    },
+    "opcode": { "type": "string", "maxLength": 64 },
+    "task": { "type": "string", "maxLength": 64 },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 64 },
+      "default": []
+    },
+    "computer": {
+      "type": "string",
+      "description": "Hostname as reported in the event (optional; host_id is the canonical identifier).",
+      "maxLength": 256
+    },
+    "message": {
+      "type": "string",
+      "description": "Short message. Prefer truncation/redaction over dumping full raw strings.",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "data": {
+      "type": "object",
+      "description": "Structured event payload (safe key-values).",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string", "maxLength": 4000 },
+          { "type": "number" },
+          { "type": "integer" },
+          { "type": "boolean" },
+          { "type": "null" }
+        ]
+      },
+      "default": {}
+    },
+    "tags": { "$ref": "common.schema.json#/$defs/tags" }
+  }
+}
