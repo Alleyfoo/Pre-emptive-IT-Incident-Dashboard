@@ -1,53 +1,89 @@
 # Pre-emptive IT Incident Dashboard
-Ops/Observability automation: endpoint-snapshot → incident-detect → priorising → raporting.
-Artifact-first incident pipeline: ingest endpoint snapshots, detect incidents with deterministic rules, write reproducible artifacts, and surface a Streamlit dashboard (fleet + host). Runs locally or on GCP (Cloud Run service + job) with GCS-backed storage.
 
-## Quickstart (local)
+A small system that watches a fleet of computers, spots problems before they turn into outages, and shows what's happening on a single dashboard.
 
-Prereqs: Python 3.11+, git, pip.
+## The idea
+
+When a company has lots of computers, things break: a disk fills up, a service crashes, a login fails too many times. Often the warning signs are visible *before* anything actually goes wrong — but only if someone is looking. This project does the looking automatically.
+
+It works in three steps:
+
+1. **Collect** — each computer regularly produces a "snapshot" (a small JSON file describing its current state: errors, services, recent events).
+2. **Detect** — a worker reads those snapshots and applies a set of rules to flag anything that looks like a real or developing incident.
+3. **Show** — a web dashboard summarises the whole fleet, and lets you drill into a single computer to see its timeline and the evidence behind each alert.
+
+Every run also writes its results to disk as files (called *artifacts*), so you can re-open any past run and see exactly what was detected and why.
+
+## What's in the repo
+
+- `runtime/` — the worker that turns snapshots into incidents.
+- `demos/streamlit_incident_dashboard.py` — the dashboard UI.
+- `tools/` — helpers to generate fake test data and validate output.
+- `collector/snapshot.ps1` — a small Windows script that produces a real snapshot from event logs.
+- `docs/` — deployment guides.
+
+## Run it on your laptop
+
+You need Python 3.11 or newer.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r demos/requirements-demo.txt
+```
 
-# Generate synthetic data, run worker, validate
+Generate some fake data, run the worker on it, and check the output is valid:
+
+```powershell
 python -m tools.generate_ticket_scenarios --run-id demo
 python -m runtime.incident_flow --run-id demo
 python -m tools.validate --run-id demo
+```
 
-# Dashboard
+Open the dashboard:
+
+```powershell
 streamlit run demos/streamlit_incident_dashboard.py
 ```
 
-Artifacts land in `artifacts/<run-id>/` (fleet_summary.json, host timelines/reports, run_status.json, latest_run.txt).
+Results land in `artifacts/<run-id>/` — a fleet summary, per-host timelines and reports, and a status file that tells the dashboard which run to display.
 
-## Docker / Compose
+## Run it with Docker
 
-Single image runs the dashboard by default. One-command local stack:
+If you don't want to install Python locally, one command starts the whole thing:
 
 ```bash
 docker compose up --build
 ```
 
-Worker uses the same image (override command/args) to generate scenarios, run incident flow, and validate. Bind `/artifacts` volume or set `ARTIFACTS_ROOT=gs://...`.
+The same image is used for the dashboard and the worker; the worker just gets a different command. Artifacts can be written to a local folder or to cloud storage by setting `ARTIFACTS_ROOT=gs://...`.
 
-## Cloud Run (service + job)
+## Run it on Google Cloud
 
-- Dashboard (Cloud Run service, IAM-only): `ARTIFACTS_ROOT=gs://<bucket>/artifacts`.
-- Worker (Cloud Run job): `ARTIFACTS_ROOT=gs://<bucket>/artifacts`, optional `--snapshot-root gs://<bucket>/snapshots` for real snapshots; writes latest_run.txt only on success, with run_status.json and retention purge.
-- Scheduler: Cloud Scheduler trigger to execute the job on cadence.
+The system is designed to run on Google Cloud Run with two pieces:
 
-Docs: `docs/DEPLOY_CLOUD_RUN.md` (quick) and `docs/DEPLOY_PRODUCTION.md` (IAM, lifecycle, scheduler).
+- **Dashboard** — a Cloud Run *service* (always-on web app), reading artifacts from a Cloud Storage bucket. Locked down to IAM-authenticated users.
+- **Worker** — a Cloud Run *job* (runs on demand), triggered on a schedule by Cloud Scheduler. It writes a `latest_run.txt` pointer only on success, and cleans up old runs while preserving any that have been pinned.
 
-## Ingest paths
+Two guides walk through it:
 
-- Synthetic: `tools/generate_ticket_scenarios.py`.
-- Real snapshots: upload schema-compliant `snapshots/<host_id>/snapshot-<ts>.json`; run worker in snapshot mode.
-- Reference collector: `collector/snapshot.ps1` (Windows event logs → snapshot.json).
+- `docs/DEPLOY_CLOUD_RUN.md` — minimal setup to get it running.
+- `docs/DEPLOY_PRODUCTION.md` — production concerns: IAM, bucket lifecycle, scheduler config.
 
-## Security/ops defaults
+## Where the data comes from
 
-- Schema validation on every run; redaction modes (`REDACTION_MODE=strict|balanced|off`) and evidence truncation.
-- Run locking (GCS/local) to avoid overlap; retention purge respects pinned runs.
-- Run status artifacts + latest run pointer for dashboard autodiscovery.
+Three options, depending on what you have:
+
+- **Synthetic** — `tools/generate_ticket_scenarios.py` makes fake snapshots for development and demos.
+- **Real snapshots** — drop schema-compliant files into `snapshots/<host_id>/snapshot-<ts>.json` and run the worker in snapshot mode.
+- **Reference collector** — `collector/snapshot.ps1` builds a snapshot from Windows event logs as a starting point for a real agent.
+
+## Operational defaults
+
+A few things worth knowing if you run this for real:
+
+- **Schema validation** on every run, so malformed snapshots are rejected loudly rather than silently.
+- **Redaction modes** (`REDACTION_MODE=strict|balanced|off`) and evidence truncation, so sensitive data doesn't leak into artifacts.
+- **Run locking** (in GCS or locally) prevents two workers from clobbering each other.
+- **Retention purge** removes old runs but respects pinned ones.
+- **Run status + latest-run pointer** let the dashboard auto-discover the most recent successful run without any manual config.
