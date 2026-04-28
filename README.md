@@ -1,24 +1,30 @@
-# The Computer Helper Robot
+# Pre-emptive IT Incident Dashboard
 
-Hi! This is a friendly robot that watches lots of computers to make sure they are happy and healthy.
+A small system that watches a fleet of computers, spots problems before they turn into outages, and shows what's happening on a single dashboard.
 
-## What does it do?
+## The idea
 
-Think about a teacher who watches kids on the playground. If a kid trips and falls, the teacher runs over to help. Our robot is like that, but for computers!
+When a company has lots of computers, things break: a disk fills up, a service crashes, a login fails too many times. Often the warning signs are visible *before* anything actually goes wrong — but only if someone is looking. This project does the looking automatically.
 
-1. The robot **looks** at computers and sees how they are feeling.
-2. If a computer is sick or sad, the robot says "Uh oh!"
-3. The robot writes everything down in a notebook so we can read it later.
-4. We can look at a big picture board (called a dashboard) to see all the computers at once.
+It works in three steps:
 
-## How do I play with it on my own computer?
+1. **Collect** — each computer regularly produces a "snapshot" (a small JSON file describing its current state: errors, services, recent events).
+2. **Detect** — a worker reads those snapshots and applies a set of rules to flag anything that looks like a real or developing incident.
+3. **Show** — a web dashboard summarises the whole fleet, and lets you drill into a single computer to see its timeline and the evidence behind each alert.
 
-You need a few things first, like a kid needs crayons before they color:
+Every run also writes its results to disk as files (called *artifacts*), so you can re-open any past run and see exactly what was detected and why.
 
-- A program called **Python** (it makes the robot work).
-- A program called **git** (it brings the robot's pieces to your computer).
+## What's in the repo
 
-Then you type these magic words:
+- `runtime/` — the worker that turns snapshots into incidents.
+- `demos/streamlit_incident_dashboard.py` — the dashboard UI.
+- `tools/` — helpers to generate fake test data and validate output.
+- `collector/snapshot.ps1` — a small Windows script that produces a real snapshot from event logs.
+- `docs/` — deployment guides.
+
+## Run it on your laptop
+
+You need Python 3.11 or newer.
 
 ```powershell
 python -m venv .venv
@@ -26,7 +32,7 @@ python -m venv .venv
 python -m pip install -r demos/requirements-demo.txt
 ```
 
-Now make some pretend computer problems and let the robot find them:
+Generate some fake data, run the worker on it, and check the output is valid:
 
 ```powershell
 python -m tools.generate_ticket_scenarios --run-id demo
@@ -34,48 +40,50 @@ python -m runtime.incident_flow --run-id demo
 python -m tools.validate --run-id demo
 ```
 
-And to see the pretty picture board:
+Open the dashboard:
 
 ```powershell
 streamlit run demos/streamlit_incident_dashboard.py
 ```
 
-The robot puts all its notes in a folder called `artifacts/`. That is the robot's notebook!
+Results land in `artifacts/<run-id>/` — a fleet summary, per-host timelines and reports, and a status file that tells the dashboard which run to display.
 
-## Using a big box called Docker
+## Run it with Docker
 
-Docker is like a lunchbox that already has everything inside. You just open it and eat!
+If you don't want to install Python locally, one command starts the whole thing:
 
 ```bash
 docker compose up --build
 ```
 
-That one line opens the lunchbox and the robot starts working. Yum!
+The same image is used for the dashboard and the worker; the worker just gets a different command. Artifacts can be written to a local folder or to cloud storage by setting `ARTIFACTS_ROOT=gs://...`.
 
-## Putting the robot in the sky (the Cloud)
+## Run it on Google Cloud
 
-The cloud is just other people's computers far far away. We can send our robot there too, so it works even when your computer is sleeping.
+The system is designed to run on Google Cloud Run with two pieces:
 
-If you want to do this, two grown-up books will help you:
+- **Dashboard** — a Cloud Run *service* (always-on web app), reading artifacts from a Cloud Storage bucket. Locked down to IAM-authenticated users.
+- **Worker** — a Cloud Run *job* (runs on demand), triggered on a schedule by Cloud Scheduler. It writes a `latest_run.txt` pointer only on success, and cleans up old runs while preserving any that have been pinned.
 
-- `docs/DEPLOY_CLOUD_RUN.md` — the quick book.
-- `docs/DEPLOY_PRODUCTION.md` — the big book with all the details.
+Two guides walk through it:
 
-## Where does the robot get its information?
+- `docs/DEPLOY_CLOUD_RUN.md` — minimal setup to get it running.
+- `docs/DEPLOY_PRODUCTION.md` — production concerns: IAM, bucket lifecycle, scheduler config.
 
-Three ways, like three different snacks:
+## Where the data comes from
 
-- **Pretend snacks** — we make fake computer problems for practice.
-- **Real snacks** — real computers send their report cards to the robot.
-- **A little helper** — a tiny program on Windows computers that fills out the report card for them.
+Three options, depending on what you have:
 
-## Safety rules
+- **Synthetic** — `tools/generate_ticket_scenarios.py` makes fake snapshots for development and demos.
+- **Real snapshots** — drop schema-compliant files into `snapshots/<host_id>/snapshot-<ts>.json` and run the worker in snapshot mode.
+- **Reference collector** — `collector/snapshot.ps1` builds a snapshot from Windows event logs as a starting point for a real agent.
 
-The robot is careful and follows these rules:
+## Operational defaults
 
-- It checks every paper to make sure it is filled out the right way.
-- It hides secret things so no one peeks.
-- Only one robot works at a time, so they do not bonk into each other.
-- It throws away old notes it does not need anymore (but keeps the important ones).
+A few things worth knowing if you run this for real:
 
-The end!
+- **Schema validation** on every run, so malformed snapshots are rejected loudly rather than silently.
+- **Redaction modes** (`REDACTION_MODE=strict|balanced|off`) and evidence truncation, so sensitive data doesn't leak into artifacts.
+- **Run locking** (in GCS or locally) prevents two workers from clobbering each other.
+- **Retention purge** removes old runs but respects pinned ones.
+- **Run status + latest-run pointer** let the dashboard auto-discover the most recent successful run without any manual config.
