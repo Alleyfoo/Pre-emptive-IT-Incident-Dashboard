@@ -1,53 +1,81 @@
-# Pre-emptive IT Incident Dashboard
-Ops/Observability automation: endpoint-snapshot → incident-detect → priorising → raporting.
-Artifact-first incident pipeline: ingest endpoint snapshots, detect incidents with deterministic rules, write reproducible artifacts, and surface a Streamlit dashboard (fleet + host). Runs locally or on GCP (Cloud Run service + job) with GCS-backed storage.
+# The Computer Helper Robot
 
-## Quickstart (local)
+Hi! This is a friendly robot that watches lots of computers to make sure they are happy and healthy.
 
-Prereqs: Python 3.11+, git, pip.
+## What does it do?
+
+Think about a teacher who watches kids on the playground. If a kid trips and falls, the teacher runs over to help. Our robot is like that, but for computers!
+
+1. The robot **looks** at computers and sees how they are feeling.
+2. If a computer is sick or sad, the robot says "Uh oh!"
+3. The robot writes everything down in a notebook so we can read it later.
+4. We can look at a big picture board (called a dashboard) to see all the computers at once.
+
+## How do I play with it on my own computer?
+
+You need a few things first, like a kid needs crayons before they color:
+
+- A program called **Python** (it makes the robot work).
+- A program called **git** (it brings the robot's pieces to your computer).
+
+Then you type these magic words:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r demos/requirements-demo.txt
+```
 
-# Generate synthetic data, run worker, validate
+Now make some pretend computer problems and let the robot find them:
+
+```powershell
 python -m tools.generate_ticket_scenarios --run-id demo
 python -m runtime.incident_flow --run-id demo
 python -m tools.validate --run-id demo
+```
 
-# Dashboard
+And to see the pretty picture board:
+
+```powershell
 streamlit run demos/streamlit_incident_dashboard.py
 ```
 
-Artifacts land in `artifacts/<run-id>/` (fleet_summary.json, host timelines/reports, run_status.json, latest_run.txt).
+The robot puts all its notes in a folder called `artifacts/`. That is the robot's notebook!
 
-## Docker / Compose
+## Using a big box called Docker
 
-Single image runs the dashboard by default. One-command local stack:
+Docker is like a lunchbox that already has everything inside. You just open it and eat!
 
 ```bash
 docker compose up --build
 ```
 
-Worker uses the same image (override command/args) to generate scenarios, run incident flow, and validate. Bind `/artifacts` volume or set `ARTIFACTS_ROOT=gs://...`.
+That one line opens the lunchbox and the robot starts working. Yum!
 
-## Cloud Run (service + job)
+## Putting the robot in the sky (the Cloud)
 
-- Dashboard (Cloud Run service, IAM-only): `ARTIFACTS_ROOT=gs://<bucket>/artifacts`.
-- Worker (Cloud Run job): `ARTIFACTS_ROOT=gs://<bucket>/artifacts`, optional `--snapshot-root gs://<bucket>/snapshots` for real snapshots; writes latest_run.txt only on success, with run_status.json and retention purge.
-- Scheduler: Cloud Scheduler trigger to execute the job on cadence.
+The cloud is just other people's computers far far away. We can send our robot there too, so it works even when your computer is sleeping.
 
-Docs: `docs/DEPLOY_CLOUD_RUN.md` (quick) and `docs/DEPLOY_PRODUCTION.md` (IAM, lifecycle, scheduler).
+If you want to do this, two grown-up books will help you:
 
-## Ingest paths
+- `docs/DEPLOY_CLOUD_RUN.md` — the quick book.
+- `docs/DEPLOY_PRODUCTION.md` — the big book with all the details.
 
-- Synthetic: `tools/generate_ticket_scenarios.py`.
-- Real snapshots: upload schema-compliant `snapshots/<host_id>/snapshot-<ts>.json`; run worker in snapshot mode.
-- Reference collector: `collector/snapshot.ps1` (Windows event logs → snapshot.json).
+## Where does the robot get its information?
 
-## Security/ops defaults
+Three ways, like three different snacks:
 
-- Schema validation on every run; redaction modes (`REDACTION_MODE=strict|balanced|off`) and evidence truncation.
-- Run locking (GCS/local) to avoid overlap; retention purge respects pinned runs.
-- Run status artifacts + latest run pointer for dashboard autodiscovery.
+- **Pretend snacks** — we make fake computer problems for practice.
+- **Real snacks** — real computers send their report cards to the robot.
+- **A little helper** — a tiny program on Windows computers that fills out the report card for them.
+
+## Safety rules
+
+The robot is careful and follows these rules:
+
+- It checks every paper to make sure it is filled out the right way.
+- It hides secret things so no one peeks.
+- Only one robot works at a time, so they do not bonk into each other.
+- It throws away old notes it does not need anymore (but keeps the important ones).
+
+The end!
