@@ -260,6 +260,209 @@ def sprout_svg(leaves: int, sev: int, bloom: bool = False, index: int = 0, w: in
 
 
 # ─────────────────────────────────────────────────────────
+# Computer SVG (port of computers.jsx)
+# ─────────────────────────────────────────────────────────
+
+def computer_svg(host_id: str = "HOST-001", sev: int = 60, index: int = 0, w: int = 108, h: int = 130) -> str:
+    sev_c = _sev_class(sev)
+    cx = w / 2
+    screen_w = w * 0.72
+    screen_h = h * 0.52
+    screen_x = (w - screen_w) / 2
+    screen_y = 14
+
+    body_fill = {
+        "critical": "#e8d6c0",
+        "hot":      "#ecdfb7",
+        "warm":     "#eadec0",
+        "cool":     "#dde7d0",
+    }[sev_c]
+    screen_fill = {
+        "critical": "#f3c8a8",
+        "hot":      "#f5dca2",
+        "warm":     "#f1e7c1",
+        "cool":     "#cfe2c2",
+    }[sev_c]
+    accent = {
+        "critical": "var(--sev-4)",
+        "hot":      "var(--sev-3)",
+        "warm":     "var(--pollen-600)",
+        "cool":     "var(--leaf-500)",
+    }[sev_c]
+    led_fill = {
+        "critical": "var(--sev-4)",
+        "hot":      "var(--sev-3)",
+        "warm":     "var(--sun)",
+        "cool":     "var(--leaf-300)",
+    }[sev_c]
+
+    seed = (index * 31 + len(host_id) * 7) % 100
+    eye_shift = (seed % 5) - 2
+
+    face_y = screen_y + screen_h * 0.5
+    eye_y = face_y - 4
+    mouth_y = face_y + 12
+
+    # Face per mood
+    if sev_c == "cool":
+        face = (
+            f'<circle cx="{cx - 14 + eye_shift:.1f}" cy="{eye_y:.1f}" r="2.6" fill="var(--ink)" />'
+            f'<circle cx="{cx + 14 + eye_shift:.1f}" cy="{eye_y:.1f}" r="2.6" fill="var(--ink)" />'
+            f'<circle cx="{cx - 22:.1f}" cy="{eye_y + 6:.1f}" r="1.6" fill="#e69aa1" opacity="0.6" />'
+            f'<circle cx="{cx + 22:.1f}" cy="{eye_y + 6:.1f}" r="1.6" fill="#e69aa1" opacity="0.6" />'
+            f'<path d="M {cx - 8:.1f} {mouth_y:.1f} Q {cx:.1f} {mouth_y + 5:.1f} {cx + 8:.1f} {mouth_y:.1f}" '
+            f'fill="none" stroke="var(--ink)" stroke-width="1.6" stroke-linecap="round" />'
+        )
+    elif sev_c == "warm":
+        face = (
+            f'<path d="M {cx - 18:.1f} {eye_y:.1f} q 4 -3 8 0" stroke="var(--ink)" stroke-width="1.6" fill="none" stroke-linecap="round" />'
+            f'<path d="M {cx + 10:.1f} {eye_y:.1f} q 4 -3 8 0" stroke="var(--ink)" stroke-width="1.6" fill="none" stroke-linecap="round" />'
+            f'<ellipse cx="{cx:.1f}" cy="{mouth_y:.1f}" rx="3" ry="2.4" fill="var(--ink)" />'
+            f'<text x="{cx + 26:.1f}" y="{face_y - 10:.1f}" font-family="var(--font-display)" font-size="14" font-style="italic" '
+            f'fill="var(--pollen-600)" font-weight="500">z</text>'
+            f'<text x="{cx + 32:.1f}" y="{face_y - 16:.1f}" font-family="var(--font-display)" font-size="10" font-style="italic" '
+            f'fill="var(--pollen-600)" font-weight="500">z</text>'
+        )
+    elif sev_c == "hot":
+        face = (
+            f'<circle cx="{cx - 14 + eye_shift:.1f}" cy="{eye_y:.1f}" r="3" fill="var(--ink)" />'
+            f'<circle cx="{cx + 14 + eye_shift:.1f}" cy="{eye_y:.1f}" r="3" fill="var(--ink)" />'
+            f'<circle cx="{cx - 14 + eye_shift - 1:.1f}" cy="{eye_y - 1:.1f}" r="0.8" fill="white" />'
+            f'<circle cx="{cx + 14 + eye_shift - 1:.1f}" cy="{eye_y - 1:.1f}" r="0.8" fill="white" />'
+            f'<path d="M {cx - 7:.1f} {mouth_y + 1:.1f} Q {cx:.1f} {mouth_y - 3:.1f} {cx + 7:.1f} {mouth_y + 1:.1f}" '
+            f'fill="none" stroke="var(--ink)" stroke-width="1.6" stroke-linecap="round" />'
+            f'<path d="M {cx + 22:.1f} {eye_y - 2:.1f} q -3 5 0 8 q 3 -3 0 -8 Z" fill="var(--water-400)" />'
+        )
+    else:  # critical
+        x1l, y1l = cx - 18, eye_y - 3
+        x2l, y2l = cx - 10, eye_y + 3
+        x1r, y1r = cx + 10, eye_y - 3
+        x2r, y2r = cx + 18, eye_y + 3
+        bx = cx + 8
+        by = eye_y - 12
+        face = (
+            f'<g stroke="var(--ink)" stroke-width="1.8" stroke-linecap="round">'
+            f'<line x1="{x1l:.1f}" y1="{y1l:.1f}" x2="{x2l:.1f}" y2="{y2l:.1f}" />'
+            f'<line x1="{x1l:.1f}" y1="{y2l:.1f}" x2="{x2l:.1f}" y2="{y1l:.1f}" />'
+            f'<line x1="{x1r:.1f}" y1="{y1r:.1f}" x2="{x2r:.1f}" y2="{y2r:.1f}" />'
+            f'<line x1="{x1r:.1f}" y1="{y2r:.1f}" x2="{x2r:.1f}" y2="{y1r:.1f}" />'
+            f'</g>'
+            f'<circle cx="{cx:.1f}" cy="{mouth_y + 1:.1f}" r="2.4" fill="none" stroke="var(--ink)" stroke-width="1.4" />'
+            f'<g transform="translate({bx:.1f} {by:.1f}) rotate(-18)">'
+            f'<rect x="-22" y="-3" width="44" height="7" rx="1.5" fill="#fbeede" stroke="#e6cba5" stroke-width="0.5" />'
+            f'<line x1="-14" y1="-3" x2="-14" y2="4" stroke="#e6cba5" stroke-width="0.5" />'
+            f'<line x1="-2" y1="-3" x2="-2" y2="4" stroke="#e6cba5" stroke-width="0.5" />'
+            f'<line x1="10" y1="-3" x2="10" y2="4" stroke="#e6cba5" stroke-width="0.5" />'
+            f'</g>'
+        )
+
+    # Unique IDs for defs
+    safe_id = html.escape(host_id).replace(" ", "_").replace("-", "_")
+    scan_id = f"scan_{index}_{safe_id}"
+    shadow_id = f"shadow_{index}_{safe_id}"
+
+    led_blink = (
+        f'<animate attributeName="opacity" values="1;0.3;1" dur="1.6s" repeatCount="indefinite" />'
+        if sev_c != "cool" else ""
+    )
+
+    return (
+        f'<svg class="computer-svg sym-{sev_c}" width="{w}" height="{h}" viewBox="0 0 {w} {h}" aria-hidden="true">'
+        f'<defs>'
+        f'  <pattern id="{scan_id}" width="2" height="2" patternUnits="userSpaceOnUse">'
+        f'    <rect width="2" height="2" fill="{screen_fill}" />'
+        f'    <line x1="0" y1="0.5" x2="2" y2="0.5" stroke="rgba(0,0,0,0.05)" stroke-width="0.4" />'
+        f'  </pattern>'
+        f'  <filter id="{shadow_id}" x="-30%" y="-30%" width="160%" height="160%">'
+        f'    <feGaussianBlur in="SourceAlpha" stdDeviation="2" />'
+        f'    <feOffset dx="0" dy="2" />'
+        f'    <feComponentTransfer><feFuncA type="linear" slope="0.18" /></feComponentTransfer>'
+        f'    <feMerge><feMergeNode /><feMergeNode in="SourceGraphic" /></feMerge>'
+        f'  </filter>'
+        f'</defs>'
+        f'<ellipse cx="{cx:.1f}" cy="{h - 6}" rx="{w * 0.32:.1f}" ry="3" fill="rgba(60,60,60,0.08)" />'
+        f'<rect x="{cx - 18:.1f}" y="{h - 22}" width="36" height="10" rx="2" '
+        f'fill="{body_fill}" stroke="{accent}" stroke-opacity="0.25" stroke-width="1" />'
+        f'<rect x="{cx - 28:.1f}" y="{h - 12}" width="56" height="6" rx="1.5" '
+        f'fill="{body_fill}" stroke="{accent}" stroke-opacity="0.25" stroke-width="1" />'
+        f'<g filter="url(#{shadow_id})">'
+        f'  <rect x="{screen_x - 8:.1f}" y="{screen_y - 8}" width="{screen_w + 16:.1f}" height="{screen_h + 22:.1f}" '
+        f'  rx="10" fill="{body_fill}" stroke="rgba(0,0,0,0.12)" stroke-width="0.6" />'
+        f'</g>'
+        f'<rect x="{screen_x:.1f}" y="{screen_y}" width="{screen_w:.1f}" height="{screen_h:.1f}" '
+        f'rx="6" fill="url(#{scan_id})" stroke="rgba(0,0,0,0.18)" stroke-width="0.6" />'
+        f'{face}'
+        f'<circle cx="{screen_x + screen_w - 5:.1f}" cy="{screen_y + screen_h + 7:.1f}" r="1.4" fill="{led_fill}">'
+        f'{led_blink}</circle>'
+        f'</svg>'
+    )
+
+
+def render_workshop(clusters: List[Dict]) -> None:
+    cluster_cards = []
+    for i, c in enumerate(clusters[:6]):
+        sev = c.get("severity", 50)
+        n_hosts = c.get("affected_hosts", 0)
+        example = c.get("example_hosts", [])
+        show_hosts = example[:5]
+        overflow = n_hosts - len(show_hosts) if n_hosts > len(show_hosts) else 0
+
+        computers_html = "".join(
+            computer_svg(hid, sev, index=i * 10 + j, w=108, h=130)
+            for j, hid in enumerate(show_hosts)
+        )
+        if overflow > 0:
+            computers_html += (
+                f'<div class="comp-more">'
+                f'<span class="num">+{overflow}</span>'
+                f'<span class="lbl">more</span>'
+                f'</div>'
+            )
+
+        status = c.get("status", "ongoing")
+        status_dot = "var(--leaf-400)" if status == "new" else "var(--sun)"
+        status_label = "Sprouting today" if status == "new" else "Ongoing"
+        sig_key = html.escape((c.get("signature_key") or c.get("signature_hash", ""))[:40])
+
+        cluster_cards.append(
+            f'<div class="comp-cluster">'
+            f'  <div class="comp-cluster-row">{computers_html}</div>'
+            f'  <div class="comp-cluster-meta">'
+            f'    <div>'
+            f'      <span class="name">{sig_key}</span>'
+            f'      <span class="meta">{n_hosts} hosts · sev {sev}</span>'
+            f'    </div>'
+            f'    <span class="status-pill {status}">'
+            f'      <span style="width:6px;height:6px;border-radius:50%;background:{status_dot};"></span>'
+            f'      {status_label}'
+            f'    </span>'
+            f'  </div>'
+            f'</div>'
+        )
+
+    st.markdown(
+        f"""
+        <section class="workshop-wrap">
+          <div class="workshop-head">
+            <div>
+              <p class="eyebrow" style="color: var(--leaf-500)">The Workshop</p>
+              <h2>{len(clusters)} clusters — how are the machines feeling?</h2>
+            </div>
+            <div class="legend">
+              <span>😊 calm</span>
+              <span>😴 sleepy · watch</span>
+              <span>😰 worried · attend</span>
+              <span>🤒 unwell · urgent</span>
+            </div>
+          </div>
+          <div class="workshop-grid">{"".join(cluster_cards)}</div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ─────────────────────────────────────────────────────────
 # Fleet tab render functions
 # ─────────────────────────────────────────────────────────
 
@@ -604,6 +807,15 @@ def main() -> None:
             "Incidents detected before they become outages."
         )
         st.divider()
+        view = st.radio(
+            "Fleet view",
+            ["🌿 Meadow", "🖥️ Workshop"],
+            index=0,
+            horizontal=True,
+            help="Meadow: clusters as plants. Workshop: clusters as computers.",
+        )
+        st.session_state["_view"] = view
+        st.divider()
         if st.button("🌱 Regenerate demo data", use_container_width=True):
             st.session_state["_regen"] = True
             st.rerun()
@@ -638,7 +850,10 @@ def main() -> None:
 
     with tab_fleet:
         render_hero(fleet, run_id)
-        render_meadow(fleet.get("clusters", []))
+        if st.session_state.get("_view", "🌿 Meadow") == "🖥️ Workshop":
+            render_workshop(fleet.get("clusters", []))
+        else:
+            render_meadow(fleet.get("clusters", []))
         render_cluster_ledger(fleet.get("clusters", []))
         render_hosts_grid(fleet.get("top_hosts", []))
 

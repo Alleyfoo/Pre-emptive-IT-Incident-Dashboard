@@ -716,8 +716,129 @@ a:hover { color: var(--leaf-700); }
 .footnote em { color: var(--ink-soft); font-style: italic; font-family: var(--font-display); }
 
 /* ─────────────────────────────────────────────── */
+/* Computer theme — "the workshop"                 */
+/* ─────────────────────────────────────────────── */
+.workshop-wrap {
+  background: linear-gradient(180deg, var(--paper) 0%, var(--mist) 100%);
+  border: 1px solid var(--birch);
+  border-radius: var(--r-lg);
+  padding: var(--pad-3);
+  box-shadow: var(--shadow-card);
+  position: relative;
+  overflow: hidden;
+}
+.workshop-head {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  padding-bottom: var(--pad-2);
+  border-bottom: 1px dashed var(--birch);
+  margin-bottom: var(--pad-3);
+}
+.workshop-head h2 { font-family: var(--font-display); font-style: italic; font-weight: 500; }
+.workshop-head .legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-soft); align-items: center; }
+.workshop-head .legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+.workshop-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: var(--gap);
+}
+
+.comp-cluster {
+  background: var(--paper);
+  border: 1px solid var(--birch);
+  border-radius: var(--r-md);
+  padding: 14px 16px 12px;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: all 180ms var(--ease);
+}
+.comp-cluster:hover {
+  border-color: var(--leaf-300);
+  box-shadow: var(--shadow-soft);
+}
+
+.comp-cluster-row {
+  display: flex; align-items: flex-end; justify-content: center;
+  gap: 4px;
+  background:
+    linear-gradient(180deg, transparent 0%, transparent 70%, rgba(201, 163, 110, 0.10) 100%),
+    var(--mist);
+  border-radius: var(--r-sm);
+  padding: 8px 10px 6px;
+  min-height: 140px;
+  flex-wrap: wrap;
+}
+
+.computer-svg {
+  display: block;
+  transition: transform 200ms var(--ease);
+}
+.computer-svg:hover { transform: translateY(-3px) rotate(-1deg); }
+
+.comp-more {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  width: 60px; height: 90px;
+  border: 1px dashed var(--birch);
+  border-radius: var(--r-sm);
+  color: var(--ink-soft);
+  font-family: var(--font-display);
+  font-style: italic;
+}
+.comp-more .num { font-size: 22px; font-weight: 500; color: var(--ink); line-height: 1; }
+.comp-more .lbl { font-size: 11px; font-family: var(--font-body); font-style: normal; color: var(--ink-faint); letter-spacing: 0.06em; margin-top: 2px; }
+
+.comp-cluster-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 4px 4px 0;
+}
+.comp-cluster-meta .name { font-weight: 600; color: var(--ink); font-size: 14.5px; }
+.comp-cluster-meta .meta { display: block; color: var(--ink-faint); font-family: var(--font-mono); font-size: 11px; margin-top: 2px; }
+
+/* Theme switcher in the topbar */
+.theme-toggle {
+  display: inline-flex; background: var(--mist);
+  border: 1px solid var(--birch);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  gap: 2px;
+  align-items: center;
+}
+.theme-toggle button {
+  background: transparent; border: none;
+  font-family: var(--font-body); font-size: 12px;
+  color: var(--ink-soft);
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: all 160ms var(--ease);
+}
+.theme-toggle button.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 0 rgba(40,50,50,0.04), 0 4px 12px -6px rgba(40,50,50,0.15);
+}
+.theme-toggle button svg { width: 14px; height: 14px; }
+
+/* Sympathetic line under the Hero in computer theme */
+.sympathy {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--paper);
+  border: 1px solid var(--birch);
+  border-radius: var(--r-md);
+  padding: 14px 18px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  font-family: var(--font-display);
+  font-style: italic;
+}
+
+/* Computer chip — small avatar inline in host cards */
+.host-card .computer-svg { flex-shrink: 0; }
+
+/* ─────────────────────────────────────────────── */
 /* Small bits                                       */
 /* ─────────────────────────────────────────────── */
+
 .divider { height: 1px; background: var(--birch); }
 .spacer-sm { height: 8px; }
 .spacer-md { height: 16px; }
