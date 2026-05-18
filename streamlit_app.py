@@ -111,6 +111,13 @@ def _run_demo_pipeline(run_id: str, store) -> None:
         validate_or_raise(store, run_id)
     except Exception:
         pass
+    try:
+        from tools.validate import validate as run_validation
+        run_validation(run_id=run_id, artifacts_root=ARTIFACTS_ROOT)
+    except SystemExit:
+        pass  # schema errors are logged in the report; don't crash the app
+    except Exception:
+        pass
     write_latest(store, run_id)
 
 
