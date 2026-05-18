@@ -803,6 +803,198 @@ def render_validation(store, run_id: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────
+# Pipeline / "How it works" tab
+# ─────────────────────────────────────────────────────────
+
+def render_pipeline(fleet: Dict, store, run_id: str) -> None:
+    # Gather live stats from the current run
+    total_events = error_count = warning_count = snapshot_count = 0
+    sample_event_msg = ""
+    for key in store.list(f"{run_id}/snapshots"):
+        if not key.endswith(".json"):
+            continue
+        try:
+            snap = json.loads(store.read_text(key))
+            evts = snap.get("events", [])
+            total_events += len(evts)
+            for e in evts:
+                lvl = e.get("level", "")
+                if lvl == "Error":
+                    error_count += 1
+                    if not sample_event_msg:
+                        sample_event_msg = e.get("message", "")[:80]
+                elif lvl == "Warning":
+                    warning_count += 1
+            snapshot_count += 1
+        except Exception:
+            pass
+
+    clusters = fleet.get("clusters", [])
+    incident_count = fleet.get("incident_count", 0)
+    cluster_types = len({c.get("type") for c in clusters})
+    risk = fleet.get("overall_risk_score", 0)
+    host_count = fleet.get("host_count", snapshot_count)
+    top_hosts = fleet.get("top_hosts", [])
+    action_counts: Dict[str, int] = {}
+    for h in top_hosts:
+        a = h.get("action", "monitor")
+        action_counts[a] = action_counts.get(a, 0) + 1
+    action_text = " · ".join(f"{v} {k}" for k, v in sorted(action_counts.items(), key=lambda x: -x[1]))
+
+    # Sample incident for the "detect" step
+    sample_inc = ""
+    for c in clusters[:1]:
+        sample_inc = html.escape(c.get("signature_key", "")[:60])
+
+    steps = [
+        {
+            "n": "1",
+            "title": "Collect",
+            "stat": f"{total_events:,} events · {snapshot_count} hosts",
+            "desc": (
+                "A PowerShell script runs on each Windows endpoint and queries "
+                "System and Application event logs for the last 24 hours."
+            ),
+            "code": (
+                "Get-WinEvent -FilterHashtable @{\n"
+                "  LogName   = 'System', 'Application'\n"
+                "  StartTime = (Get-Date).AddHours(-24)\n"
+                "}"
+            ),
+        },
+        {
+            "n": "2",
+            "title": "Sanitise",
+            "stat": f"{error_count} errors · {warning_count} warnings",
+            "desc": (
+                "PII is scrubbed on the host before the snapshot leaves the machine: "
+                "email addresses, file paths, and IP addresses are replaced with safe tokens."
+            ),
+            "code": (
+                "# e-mail\n"
+                "$msg -replace '[A-Za-z0-9._%+-]+@[^\\s]+', '[REDACTED_EMAIL]'\n"
+                "# paths\n"
+                "$msg -replace '[A-Za-z]:\\\\[^\\s]+', '[REDACTED_PATH]'"
+            ),
+        },
+        {
+            "n": "3",
+            "title": "Detect",
+            "stat": f"{incident_count} incidents in {host_count} host timelines",
+            "desc": (
+                "Each host's event stream is matched against known signatures: "
+                "BSOD / BugCheck, service crash loops, Windows Update failures, "
+                "disk pressure, and network instability."
+            ),
+            "code": f"# matched pattern\n{sample_inc}" if sample_inc else None,
+        },
+        {
+            "n": "4",
+            "title": "Cluster",
+            "stat": f"{len(clusters)} clusters · {cluster_types} distinct types",
+            "desc": (
+                "Incidents sharing the same signature hash across hosts are grouped. "
+                "Seven machines with identical BSODs is a fleet-wide driver problem, "
+                "not seven coincidences."
+            ),
+            "code": None,
+        },
+        {
+            "n": "5",
+            "title": "Score",
+            "stat": f"Fleet risk {risk} · {host_count} hosts ranked",
+            "desc": (
+                "Each host gets a 0–100 risk score weighted by incident severity, "
+                "detection confidence, and how many other machines share the same pattern."
+            ),
+            "code": None,
+        },
+        {
+            "n": "6",
+            "title": "Act",
+            "stat": action_text or f"{host_count} hosts triaged",
+            "desc": (
+                "Every host gets a verdict (monitor / investigate / contact) "
+                "and specific remediation steps — roll back a driver, restart a service, "
+                "capture a minidump before the next reboot wipes it."
+            ),
+            "code": None,
+        },
+    ]
+
+    cards_html = ""
+    for i, s in enumerate(steps):
+        code_block = ""
+        if s.get("code"):
+            code_block = f'<pre class="pipe-code">{html.escape(s["code"])}</pre>'
+        arrow = '<div class="pipe-arrow">›</div>' if i < len(steps) - 1 else ""
+        cards_html += f"""
+          <div class="pipe-step">
+            <div class="pipe-num">{s['n']}</div>
+            <div class="pipe-title">{s['title']}</div>
+            <div class="pipe-stat">{s['stat']}</div>
+            <div class="pipe-desc">{s['desc']}</div>
+            {code_block}
+          </div>{arrow}"""
+
+    st.markdown(
+        f"""
+        <style>
+        .pipe-flow {{
+          display: flex; align-items: flex-start; gap: 0;
+          flex-wrap: wrap; margin-top: 24px;
+        }}
+        .pipe-step {{
+          flex: 1; min-width: 180px;
+          background: var(--paper); border: 1px solid var(--birch);
+          border-radius: 14px; padding: 20px 18px;
+        }}
+        .pipe-arrow {{
+          display: flex; align-items: flex-start; justify-content: center;
+          padding: 36px 4px 0; color: var(--ink-faint); font-size: 20px;
+          flex-shrink: 0;
+        }}
+        .pipe-num {{
+          width: 22px; height: 22px; border-radius: 50%;
+          background: var(--leaf-100); color: var(--leaf-700);
+          font-size: 11px; font-weight: 700;
+          display: flex; align-items: center; justify-content: center;
+          margin-bottom: 10px;
+        }}
+        .pipe-title {{
+          font-family: var(--font-display); font-size: 16px;
+          font-weight: 500; color: var(--ink); margin-bottom: 4px;
+        }}
+        .pipe-stat {{
+          font-family: var(--font-mono); font-size: 11px;
+          color: var(--leaf-500); font-weight: 600;
+          letter-spacing: 0.04em; margin-bottom: 8px;
+        }}
+        .pipe-desc {{ font-size: 13px; color: var(--ink-soft); line-height: 1.55; }}
+        .pipe-code {{
+          font-family: var(--font-mono); font-size: 11px;
+          background: var(--mist); border: 1px solid var(--birch);
+          border-radius: 8px; padding: 10px 12px; margin-top: 10px;
+          color: var(--ink); white-space: pre; overflow-x: auto;
+        }}
+        </style>
+        <section class="card" style="margin-top: 24px;">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Under the hood</p>
+              <h2 style="font-family: var(--font-display); font-style: italic; font-weight: 500;">
+                How the data flows
+              </h2>
+            </div>
+          </div>
+          <div class="pipe-flow">{cards_html}</div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ─────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────
 
@@ -878,8 +1070,8 @@ def main() -> None:
         return
 
     fleet_tab_label = "🖥️ Fleet — last 24 h" if _is_workshop() else "🌿 Fleet — last 24 h"
-    tab_fleet, tab_host, tab_validation = st.tabs(
-        [fleet_tab_label, "🔍 Host timeline", "✅ Validation"]
+    tab_fleet, tab_host, tab_pipeline, tab_validation = st.tabs(
+        [fleet_tab_label, "🔍 Host timeline", "⚙️ How it works", "✅ Validation"]
     )
 
     with tab_fleet:
@@ -898,6 +1090,9 @@ def main() -> None:
         else:
             host_id = st.selectbox("Host", host_options, index=0)
             render_host_view(store, run_id, host_id, fleet)
+
+    with tab_pipeline:
+        render_pipeline(fleet, store, run_id)
 
     with tab_validation:
         render_validation(store, run_id)
