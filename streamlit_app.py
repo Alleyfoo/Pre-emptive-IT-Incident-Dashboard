@@ -112,10 +112,11 @@ def _run_demo_pipeline(run_id: str, store) -> None:
     write_latest(store, run_id)
 
 
-def _bootstrap_demo_data() -> None:
+def _bootstrap_demo_data(force: bool = False) -> None:
     store = _store()
-    if store.exists(f"{DEMO_RUN_ID}/fleet_summary.json"):
+    if not force and store.exists(f"{DEMO_RUN_ID}/fleet_summary.json"):
         return
+    store.delete_prefix(DEMO_RUN_ID)
     config = ScenarioConfig(
         run_id=DEMO_RUN_ID,
         seed=42,
@@ -125,12 +126,6 @@ def _bootstrap_demo_data() -> None:
     )
     ScenarioGenerator(config=config, artifacts_root=ARTIFACTS_ROOT).generate()
     _run_demo_pipeline(DEMO_RUN_ID, store)
-
-
-def _regenerate_demo_data() -> None:
-    store = _store()
-    store.delete_prefix(DEMO_RUN_ID)
-    _bootstrap_demo_data()
 
 
 # ─────────────────────────────────────────────────────────
@@ -589,6 +584,16 @@ def main() -> None:
     )
     inject_css()
 
+    # Handle regeneration before rendering anything else
+    if st.session_state.get("_regen"):
+        del st.session_state["_regen"]
+        with st.spinner("Growing new data…"):
+            _bootstrap_demo_data(force=True)
+        st.rerun()
+
+    with st.spinner("Preparing demo data…"):
+        _bootstrap_demo_data()
+
     with st.sidebar:
         st.markdown(
             '<p class="eyebrow" style="color:var(--leaf-500)">Pre-emptive IT</p>',
@@ -600,17 +605,13 @@ def main() -> None:
         )
         st.divider()
         if st.button("🌱 Regenerate demo data", use_container_width=True):
-            with st.spinner("Growing new data…"):
-                _regenerate_demo_data()
+            st.session_state["_regen"] = True
             st.rerun()
         st.divider()
         st.caption("*Kevät tulee aina.* Spring always comes.")
         st.markdown(
             "[Source on GitHub](https://github.com/Alleyfoo/Pre-emptive-IT-Incident-Dashboard)"
         )
-
-    with st.spinner("Preparing demo data…"):
-        _bootstrap_demo_data()
 
     store = _store()
     runs = _available_runs(store)
