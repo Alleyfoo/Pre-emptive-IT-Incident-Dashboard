@@ -885,3 +885,44 @@ a:hover { color: var(--leaf-700); }
 @media (prefers-reduced-motion: reduce) {
   .plant svg { animation: none; }
 }
+
+/* ─────────────────────────────────────────────── */
+/* Pipeline / How it works tab                      */
+/* ─────────────────────────────────────────────── */
+.pipe-flow {
+  display: flex; align-items: flex-start; gap: 0;
+  flex-wrap: wrap; margin-top: 24px;
+}
+.pipe-step {
+  flex: 1; min-width: 180px;
+  background: var(--paper); border: 1px solid var(--birch);
+  border-radius: 14px; padding: 20px 18px;
+}
+.pipe-arrow {
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 36px 4px 0; color: var(--ink-faint); font-size: 20px;
+  flex-shrink: 0;
+}
+.pipe-num {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--leaf-100); color: var(--leaf-700);
+  font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 10px;
+}
+.pipe-title {
+  font-family: var(--font-display); font-size: 16px;
+  font-weight: 500; color: var(--ink); margin-bottom: 4px;
+}
+.pipe-stat {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--leaf-500); font-weight: 600;
+  letter-spacing: 0.04em; margin-bottom: 8px;
+}
+.pipe-desc { font-size: 13px; color: var(--ink-soft); line-height: 1.55; }
+.pipe-code {
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--mist); border: 1px solid var(--birch);
+  border-radius: 8px; padding: 10px 12px; margin-top: 10px;
+  color: var(--ink); white-space: pre; overflow-x: auto;
+}
