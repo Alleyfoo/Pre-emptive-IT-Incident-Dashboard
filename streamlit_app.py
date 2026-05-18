@@ -922,31 +922,34 @@ def render_pipeline(fleet: Dict, store, run_id: str) -> None:
         },
     ]
 
-    cards_html = ""
-    for i, s in enumerate(steps):
+    st.markdown(
+        '<div class="card" style="margin-top:24px;padding:28px 32px 20px;">'
+        '<p class="eyebrow">Under the hood</p>'
+        '<h2 style="font-family:var(--font-display);font-style:italic;font-weight:500;margin-bottom:20px;">'
+        'How the data flows</h2>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    row1 = st.columns(3)
+    row2 = st.columns(3)
+    col_map = [row1[0], row1[1], row1[2], row2[0], row2[1], row2[2]]
+
+    for col, s in zip(col_map, steps):
         code_block = ""
         if s.get("code"):
             code_block = f'<pre class="pipe-code">{html.escape(s["code"])}</pre>'
-        arrow = '<div class="pipe-arrow">›</div>' if i < len(steps) - 1 else ""
-        cards_html += f"""
-          <div class="pipe-step">
-            <div class="pipe-num">{s['n']}</div>
-            <div class="pipe-title">{s['title']}</div>
-            <div class="pipe-stat">{s['stat']}</div>
-            <div class="pipe-desc">{s['desc']}</div>
-            {code_block}
-          </div>{arrow}"""
-
-    st.markdown(
-        f'<section class="card" style="margin-top:24px;">'
-        f'<div class="card-head"><div>'
-        f'<p class="eyebrow">Under the hood</p>'
-        f'<h2 style="font-family:var(--font-display);font-style:italic;font-weight:500;">How the data flows</h2>'
-        f'</div></div>'
-        f'<div class="pipe-flow">{cards_html}</div>'
-        f'</section>',
-        unsafe_allow_html=True,
-    )
+        with col:
+            st.markdown(
+                f'<div class="pipe-step">'
+                f'<div class="pipe-num">{s["n"]}</div>'
+                f'<div class="pipe-title">{html.escape(s["title"])}</div>'
+                f'<div class="pipe-stat">{html.escape(s["stat"])}</div>'
+                f'<div class="pipe-desc">{s["desc"]}</div>'
+                f'{code_block}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
 
 # ─────────────────────────────────────────────────────────

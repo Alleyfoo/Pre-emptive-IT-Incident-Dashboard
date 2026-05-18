@@ -889,19 +889,9 @@ a:hover { color: var(--leaf-700); }
 /* ─────────────────────────────────────────────── */
 /* Pipeline / How it works tab                      */
 /* ─────────────────────────────────────────────── */
-.pipe-flow {
-  display: flex; align-items: flex-start; gap: 0;
-  flex-wrap: wrap; margin-top: 24px;
-}
 .pipe-step {
-  flex: 1; min-width: 180px;
   background: var(--paper); border: 1px solid var(--birch);
-  border-radius: 14px; padding: 20px 18px;
-}
-.pipe-arrow {
-  display: flex; align-items: flex-start; justify-content: center;
-  padding: 36px 4px 0; color: var(--ink-faint); font-size: 20px;
-  flex-shrink: 0;
+  border-radius: 14px; padding: 20px 18px; height: 100%;
 }
 .pipe-num {
   width: 22px; height: 22px; border-radius: 50%;
