@@ -1,1 +1,4 @@
--r demos/requirements-demo.txt
+streamlit
+pandas
+jsonschema<4.18
+# google-cloud-storage is optional — only needed when ARTIFACTS_ROOT=gs://...
