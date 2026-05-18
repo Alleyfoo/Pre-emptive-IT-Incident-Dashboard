@@ -807,14 +807,15 @@ def main() -> None:
             "Incidents detected before they become outages."
         )
         st.divider()
-        view = st.radio(
+        if "_view" not in st.session_state:
+            st.session_state["_view"] = "🖥️ Workshop"
+        st.radio(
             "Fleet view",
             ["🌿 Meadow", "🖥️ Workshop"],
-            index=0,
+            key="_view",
             horizontal=True,
             help="Meadow: clusters as plants. Workshop: clusters as computers.",
         )
-        st.session_state["_view"] = view
         st.divider()
         if st.button("🌱 Regenerate demo data", use_container_width=True):
             st.session_state["_regen"] = True
