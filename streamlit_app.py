@@ -165,7 +165,13 @@ def _sev_class(s: int) -> str:
     return "cool"
 
 
+def _is_workshop() -> bool:
+    return "Workshop" in st.session_state.get("_view", "🖥️ Workshop")
+
+
 def _sev_label(s: int) -> str:
+    if _is_workshop():
+        return {"cool": "Idle", "warm": "Warm", "hot": "Overheating", "critical": "Down"}[_sev_class(s)]
     return {"cool": "Calm", "warm": "Sprouting", "hot": "Flowering", "critical": "Overgrown"}[_sev_class(s)]
 
 
@@ -425,7 +431,7 @@ def render_workshop(clusters: List[Dict]) -> None:
 
         status = c.get("status", "ongoing")
         status_dot = "var(--leaf-400)" if status == "new" else "var(--sun)"
-        status_label = "Sprouting today" if status == "new" else "Ongoing"
+        status_label = "New issue" if status == "new" else "Running"
         sig_key = html.escape((c.get("signature_key") or c.get("signature_hash", ""))[:40])
 
         cluster_cards.append(
@@ -483,13 +489,22 @@ def render_hero(fleet: Dict, run_id: str) -> None:
     total = fleet.get("hosts_total", len(fleet.get("top_hosts", [])) or 20)
     new = sum(1 for c in clusters if c.get("status") == "new")
     risk = fleet.get("overall_risk_score", 0)
+    workshop = _is_workshop()
+    if workshop:
+        headline = f'{affected} machines <span class="light">flagged.</span>'
+        subline = f"{len(clusters)} issues detected. Start with the hottest — the rest should cool down by end of day."
+        hosts_sub = "machines on the network"
+    else:
+        headline = f'{affected} hosts are <span class="light">stirring.</span>'
+        subline = f"{len(clusters)} clusters surfaced. Tend the flowering ones first — the rest will be calm by lunch."
+        hosts_sub = "hosts in the field"
     st.markdown(
         f"""
         <div class="hero">
           <div class="hero-left">
             <p class="eyebrow" style="color: var(--leaf-500)">Today · run {html.escape(run_id)}</p>
-            <h1>{affected} hosts are <span class="light">stirring.</span></h1>
-            <p>{len(clusters)} clusters surfaced. Tend the flowering ones first — the rest will be calm by lunch.</p>
+            <h1>{headline}</h1>
+            <p>{subline}</p>
           </div>
           <div class="hero-right">
             <div class="kpi">
@@ -497,14 +512,14 @@ def render_hero(fleet: Dict, run_id: str) -> None:
               <span class="num">{risk}</span>
             </div>
             <div class="kpi">
-              <span class="eyebrow">Clusters</span>
+              <span class="eyebrow">{"Issues" if workshop else "Clusters"}</span>
               <span class="num">{len(clusters)}</span>
               <span class="delta warm">↗ {new} new today</span>
             </div>
             <div class="kpi">
               <span class="eyebrow">Affected</span>
               <span class="num">{affected}<small style="font-size:16px;color:var(--ink-faint)"> / {total}</small></span>
-              <span class="sub">hosts in the field</span>
+              <span class="sub">{hosts_sub}</span>
             </div>
           </div>
         </div>
@@ -594,7 +609,8 @@ def render_cluster_ledger(clusters: List[Dict]) -> None:
         example = c.get("example_hosts", [])
         hosts_label = ", ".join(example[:3]) + ("…" if len(example) > 3 else "")
         status = c.get("status", "ongoing")
-        status_label = "Sprouting today" if status == "new" else "Ongoing"
+        workshop = _is_workshop()
+        status_label = ("New issue" if workshop else "Sprouting today") if status == "new" else ("Running" if workshop else "Ongoing")
         status_dot_color = "var(--leaf-400)" if status == "new" else "var(--sun)"
         inc_type = c.get("type") or "bsod"
         sig_key = c.get("signature_key") or c.get("signature_hash", "")[:12]
@@ -617,19 +633,26 @@ def render_cluster_ledger(clusters: List[Dict]) -> None:
             <span style="color: var(--ink-faint); text-align: right; font-size: 18px;">›</span>
           </div>
         """)
+    workshop = _is_workshop()
+    eyebrow = "Issue log" if workshop else "Cluster ledger"
+    heading = "What&#39;s running hot" if workshop else "What&#39;s growing"
+    col_item = "Issue" if workshop else "Cluster"
+    col_hosts = "Machines" if workshop else "Hosts"
+    col_sev = "Heat" if workshop else "Severity"
+    col_status = "State" if workshop else "Status"
     st.markdown(
         f"""
         <section class="card" style="margin-top: 24px;">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Cluster ledger</p>
-              <h2 style="font-family: var(--font-display); font-style: italic; font-weight: 500;">What's growing</h2>
+              <p class="eyebrow">{eyebrow}</p>
+              <h2 style="font-family: var(--font-display); font-style: italic; font-weight: 500;">{heading}</h2>
             </div>
           </div>
           <div class="cluster-list">
             <div class="cluster-row head">
-              <span></span><span>Cluster</span><span>Hosts</span>
-              <span>Severity</span><span>Status</span><span></span>
+              <span></span><span>{col_item}</span><span>{col_hosts}</span>
+              <span>{col_sev}</span><span>{col_status}</span><span></span>
             </div>
             {"".join(rows)}
           </div>
@@ -785,8 +808,8 @@ def render_validation(store, run_id: str) -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="Kevät · Pre-emptive IT",
-        page_icon="🌱",
+        page_title="Pre-emptive IT — Incident Dashboard",
+        page_icon="🖥️",
         layout="wide",
     )
     inject_css()
@@ -794,7 +817,8 @@ def main() -> None:
     # Handle regeneration before rendering anything else
     if st.session_state.get("_regen"):
         del st.session_state["_regen"]
-        with st.spinner("Growing new data…"):
+        spinner_msg = "Rebooting the fleet…" if _is_workshop() else "Growing new data…"
+        with st.spinner(spinner_msg):
             _bootstrap_demo_data(force=True)
         st.rerun()
 
@@ -807,7 +831,7 @@ def main() -> None:
             unsafe_allow_html=True,
         )
         st.markdown(
-            "**Kevät demo** — synthetic fleet of 20 Windows endpoints. "
+            "Synthetic fleet of 20 Windows endpoints. "
             "Incidents detected before they become outages."
         )
         st.divider()
@@ -821,7 +845,8 @@ def main() -> None:
             help="Meadow: clusters as plants. Workshop: clusters as computers.",
         )
         st.divider()
-        if st.button("🌱 Regenerate demo data", use_container_width=True):
+        regen_icon = "🔄" if _is_workshop() else "🌱"
+        if st.button(f"{regen_icon} Regenerate demo data", use_container_width=True):
             st.session_state["_regen"] = True
             st.rerun()
         st.divider()
@@ -852,8 +877,9 @@ def main() -> None:
         st.warning(f"No fleet summary found for run `{run_id}`.")
         return
 
+    fleet_tab_label = "🖥️ Fleet — last 24 h" if _is_workshop() else "🌿 Fleet — last 24 h"
     tab_fleet, tab_host, tab_validation = st.tabs(
-        ["🌿 Fleet — last 24 h", "🔍 Host timeline", "✅ Validation"]
+        [fleet_tab_label, "🔍 Host timeline", "✅ Validation"]
     )
 
     with tab_fleet:
