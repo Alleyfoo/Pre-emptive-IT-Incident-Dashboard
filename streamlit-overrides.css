@@ -1,0 +1,46 @@
+/* Kevät · Streamlit overrides
+ * Append this to a copy of styles.css and load via st.markdown(<style>) injection.
+ * See HANDOFF.md · section 4 for setup.
+ */
+
+/* Streamlit scaffolding ─────────────────────────────────── */
+.stApp                            { background: var(--linen); }
+.block-container                  { padding-top: 2.5rem; max-width: 1440px; }
+
+/* Headings (st.title, st.header) */
+h1, .stApp h1                     { font-family: var(--font-display); font-weight: 500; letter-spacing: -0.02em; color: var(--ink); }
+h2, .stApp h2                     { font-family: var(--font-display); font-weight: 500; letter-spacing: -0.01em; }
+h3, .stApp h3                     { font-family: var(--font-body); font-weight: 600; }
+
+/* st.metric */
+[data-testid="stMetricValue"]     { font-family: var(--font-display); font-weight: 500; letter-spacing: -0.02em; color: var(--ink); font-size: 38px; }
+[data-testid="stMetricLabel"]     { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+
+/* st.tabs — pill switcher */
+div[data-baseweb="tab-list"]      { background: var(--mist); border: 1px solid var(--birch); border-radius: 999px; padding: 4px; gap: 2px; }
+button[data-baseweb="tab"]        { border-radius: 999px !important; background: transparent; color: var(--ink-soft); padding: 8px 16px; }
+button[data-baseweb="tab"][aria-selected="true"] { background: var(--paper); color: var(--ink); box-shadow: 0 1px 0 rgba(40,50,50,0.04), 0 4px 12px -6px rgba(40,50,50,0.15); }
+
+/* Dataframe / table */
+[data-testid="stDataFrame"]       { border: 1px solid var(--birch); border-radius: 14px; overflow: hidden; }
+
+/* Multiselect / select chips */
+div[data-baseweb="tag"]           { background: var(--leaf-100) !important; color: var(--leaf-700) !important; border-radius: 999px !important; }
+
+/* Buttons */
+.stButton > button                { border-radius: 999px; border: 1px solid var(--birch); background: var(--paper); color: var(--ink); font-family: var(--font-body); }
+.stButton > button:hover          { border-color: var(--leaf-300); background: var(--leaf-50); }
+button[kind="primary"]            { background: var(--leaf-500) !important; border-color: var(--leaf-500) !important; color: #fff !important; }
+button[kind="primary"]:hover      { background: var(--leaf-700) !important; }
+
+/* Inputs */
+input[type="text"], input[type="number"], .stTextInput input, .stNumberInput input {
+  border-radius: 999px !important;
+  border-color: var(--birch) !important;
+}
+
+/* Info / warning callouts */
+[data-baseweb="notification"]     { border-radius: 14px; border: 1px solid var(--birch); background: var(--mist); }
+
+/* Sliders */
+[data-baseweb="slider"] [role="slider"] { background: var(--leaf-500) !important; border-color: var(--leaf-500) !important; }
