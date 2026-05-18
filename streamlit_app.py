@@ -8,7 +8,9 @@ import html
 import json
 import math
 import os
+import random
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List
 
@@ -116,10 +118,12 @@ def _bootstrap_demo_data(force: bool = False) -> None:
     store = _store()
     if not force and store.exists(f"{DEMO_RUN_ID}/fleet_summary.json"):
         return
+    seed = int(time.time()) % 100000 if force else 42
+    st.session_state["_seed"] = seed
     store.delete_prefix(DEMO_RUN_ID)
     config = ScenarioConfig(
         run_id=DEMO_RUN_ID,
-        seed=42,
+        seed=seed,
         n_hosts=20,
         days=1,
         scenario_tags=["driver_rollout_wave", "slow_burn", "single_host_hardware"],
@@ -821,7 +825,10 @@ def main() -> None:
             st.session_state["_regen"] = True
             st.rerun()
         st.divider()
-        st.caption("*Kevät tulee aina.* Spring always comes.")
+        if "Workshop" in st.session_state.get("_view", "🖥️ Workshop"):
+            st.caption("*Every machine deserves a good morning.*")
+        else:
+            st.caption("*Kevät tulee aina.* Spring always comes.")
         st.markdown(
             "[Source on GitHub](https://github.com/Alleyfoo/Pre-emptive-IT-Incident-Dashboard)"
         )
@@ -869,9 +876,16 @@ def main() -> None:
     with tab_validation:
         render_validation(store, run_id)
 
+    _view = st.session_state.get("_view", "🖥️ Workshop")
+    _footer_left = (
+        "<em>Every machine deserves a good morning.</em>"
+        if "Workshop" in _view
+        else "<em>Kevät tulee aina.</em>"
+    )
+    _seed_used = st.session_state.get("_seed", 42)
     st.markdown(
-        '<div class="footnote"><em>Kevät tulee aina.</em>'
-        '<span>All data is synthetic · generated with seed 42</span></div>',
+        f'<div class="footnote">{_footer_left}'
+        f'<span>All data is synthetic · seed {_seed_used}</span></div>',
         unsafe_allow_html=True,
     )
 
