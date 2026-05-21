@@ -16,6 +16,7 @@ from typing import Dict, List
 
 import pandas as pd
 import streamlit as st
+from datetime import datetime, timedelta, timezone
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 if REPO_ROOT not in sys.path:
@@ -182,96 +183,304 @@ def _sev_label(s: int) -> str:
     return {"cool": "Calm", "warm": "Sprouting", "hot": "Flowering", "critical": "Overgrown"}[_sev_class(s)]
 
 
+def _format_last_ts(ts: str) -> str:
+    """Return a human-readable relative time string from an ISO timestamp."""
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = now - dt
+        minutes = int(delta.total_seconds() / 60)
+        if minutes < 2:
+            return "just now"
+        if minutes < 60:
+            return f"{minutes}m ago"
+        hours = minutes // 60
+        if hours < 24:
+            return f"{hours}h ago"
+        return f"{hours // 24}d ago"
+    except Exception:
+        return ts[:16] if ts else "—"
+
+
+def _parse_event_hour(ts: str, window_start: datetime) -> float:
+    """Return fractional hours (0–24) of ts relative to window_start, clamped."""
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        delta = (dt - window_start).total_seconds() / 3600.0
+        return max(0.0, min(24.0, delta))
+    except Exception:
+        return 0.0
+
+
+def _meadow_scene_svg(w: int = 900, h: int = 110, seed: int = 0) -> str:
+    """Decorative dawn-horizon SVG strip — sun, hills, birch trees, wildflowers."""
+    # Sky gradient
+    sky = (
+        f'<defs>'
+        f'<linearGradient id="msky-{seed}" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0%" stop-color="#dce9f5" />'
+        f'<stop offset="100%" stop-color="#f8f3e8" /></linearGradient>'
+        f'<linearGradient id="mhill-{seed}" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0%" stop-color="#b5c9a3" />'
+        f'<stop offset="100%" stop-color="#8aaa78" /></linearGradient>'
+        f'</defs>'
+        f'<rect width="{w}" height="{h}" fill="url(#msky-{seed})" />'
+    )
+
+    # Sun
+    sun_x = 80 + (seed % 120)
+    sun_y = h * 0.38
+    sun = (
+        f'<circle cx="{sun_x:.0f}" cy="{sun_y:.1f}" r="18" fill="#f5d77a" opacity="0.85" />'
+        f'<circle cx="{sun_x:.0f}" cy="{sun_y:.1f}" r="13" fill="#f7e49a" />'
+    )
+
+    # Rolling hills
+    hill_y = h * 0.55
+    hills = (
+        f'<ellipse cx="{w * 0.18:.0f}" cy="{hill_y + 20:.0f}" rx="{w * 0.22:.0f}" ry="55" fill="url(#mhill-{seed})" />'
+        f'<ellipse cx="{w * 0.55:.0f}" cy="{hill_y + 30:.0f}" rx="{w * 0.32:.0f}" ry="60" fill="#9eba8c" />'
+        f'<ellipse cx="{w * 0.88:.0f}" cy="{hill_y + 18:.0f}" rx="{w * 0.24:.0f}" ry="52" fill="#adc49a" />'
+        f'<rect x="0" y="{hill_y + 42:.0f}" width="{w}" height="{h:.0f}" fill="#c5d6b3" />'
+    )
+
+    # Birch trees
+    def _birch(tx: float, ty: float, th: float, tidx: int) -> str:
+        tw = th * 0.06
+        trunk = f'<rect x="{tx - tw/2:.1f}" y="{ty - th:.1f}" width="{tw:.1f}" height="{th:.1f}" rx="2" fill="#e8e0d0" />'
+        marks = "".join(
+            f'<rect x="{tx - tw/2 - 1:.1f}" y="{ty - th * (0.3 + i * 0.2):.1f}" '
+            f'width="{tw + 2:.1f}" height="1.5" rx="0.5" fill="#b8a898" opacity="0.55" />'
+            for i in range(3)
+        )
+        crown = (
+            f'<ellipse cx="{tx:.1f}" cy="{ty - th - 10:.1f}" rx="{th * 0.16:.1f}" ry="{th * 0.22:.1f}" fill="#7eaa6a" opacity="0.88" />'
+            f'<ellipse cx="{tx - th * 0.1:.1f}" cy="{ty - th - 6:.1f}" rx="{th * 0.12:.1f}" ry="{th * 0.16:.1f}" fill="#8db87a" opacity="0.75" />'
+        )
+        return trunk + marks + crown
+
+    tree_seed = seed % 7
+    trees_svg = "".join(
+        _birch(w * fx, h * 0.85, 42 + (tree_seed * i % 14), i)
+        for i, fx in enumerate([0.08, 0.22, 0.41, 0.63, 0.77, 0.92])
+    )
+
+    # Wildflowers
+    def _flower(fx: float, fy: float, fc: str) -> str:
+        return (
+            f'<circle cx="{fx:.1f}" cy="{fy:.1f}" r="2.2" fill="{fc}" />'
+            f'<line x1="{fx:.1f}" y1="{fy:.1f}" x2="{fx:.1f}" y2="{fy + 7:.1f}" '
+            f'stroke="#5a8a4a" stroke-width="0.9" />'
+        )
+    colors = ["#e8b4c8", "#f5d77a", "#c8d8f0", "#d4e8c0", "#f0c8a0"]
+    flowers_svg = "".join(
+        _flower(
+            w * (0.05 + (i * 0.13 + seed * 0.03) % 0.9),
+            h * 0.88 + (i % 3) * 2,
+            colors[i % len(colors)],
+        )
+        for i in range(14)
+    )
+
+    return (
+        f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" '
+        f'style="display:block;border-radius:12px 12px 0 0;overflow:hidden" aria-hidden="true">'
+        f'{sky}{sun}{hills}{trees_svg}{flowers_svg}'
+        f'</svg>'
+    )
+
+
 # ─────────────────────────────────────────────────────────
 # Sprout SVG (ported from components.jsx)
 # ─────────────────────────────────────────────────────────
 
 def sprout_svg(leaves: int, sev: int, bloom: bool = False, index: int = 0, w: int = 120, h: int = 240) -> str:
-    height_frac = max(0.42, min(1.0, 0.42 + (sev / 120) * 0.58))
-    stem_top = h * (1 - height_frac) + 6
-    stem_base = h - 10
+    """Parametric SVG plant — faithful port of components.jsx.
+    Health inverts with severity: low sev = tall lush plant, high sev = broken stem.
+    """
+    sev_c = _sev_class(sev)
+    health = max(0.0, min(1.0, 1.0 - sev / 120.0))
+    height_frac = 0.50 + 0.50 * health
+    stem_top_y = h * (1 - height_frac) + 6
+    stem_base_y = h - 10
     cx = w / 2
 
     seed = (index * 73 + leaves * 11 + round(sev)) % 100
-    wobble = 1 if seed % 2 == 0 else -1
-    stem_curve = 6 + (seed % 6)
+    ws = 1 if seed % 2 == 0 else -1   # wobble sign
+    sc = 6 + (seed % 6)               # stem curve
 
-    mid_y = (stem_top + stem_base) / 2
-    stem_path = (
-        f"M {cx} {stem_base} "
-        f"C {cx + stem_curve * wobble} {mid_y + 22}, "
-        f"{cx - stem_curve * wobble} {mid_y - 22}, "
-        f"{cx} {stem_top}"
+    broken  = sev_c == "critical"
+    drooping = sev_c in ("hot", "critical")
+    wilted   = sev_c in ("warm", "hot", "critical")
+    mid_y    = (stem_top_y + stem_base_y) / 2
+
+    crown_x, crown_y = cx, stem_top_y
+    snap_mark = ""
+
+    if broken:
+        snap_y = stem_base_y + (stem_top_y - stem_base_y) * 0.55
+        snap_x = cx + ws * 4
+        dangle_x = snap_x + ws * 28
+        dangle_y = snap_y + 26
+        stem_path = (
+            f"M {cx:.1f} {stem_base_y:.1f} "
+            f"C {cx + sc*ws:.1f} {(stem_base_y+snap_y)/2+4:.1f}, "
+            f"{cx + 2*ws:.1f} {snap_y+6:.1f}, {snap_x:.1f} {snap_y:.1f} "
+            f"M {snap_x+ws*3:.1f} {snap_y+1:.1f} "
+            f"L {snap_x+ws*10:.1f} {snap_y+4:.1f} "
+            f"Q {snap_x+ws*22:.1f} {snap_y+10:.1f} {dangle_x:.1f} {dangle_y:.1f}"
+        )
+        crown_x, crown_y = dangle_x, dangle_y
+        snap_mark = (
+            f'<g stroke="#6b5a40" stroke-width="0.9" fill="none" stroke-linecap="round">'
+            f'<path d="M {snap_x-3:.1f} {snap_y-1:.1f} l 2 -2 l -1 -2 l 3 -1" />'
+            f'<path d="M {snap_x+3:.1f} {snap_y+1:.1f} l -1 2 l 2 1" /></g>'
+        )
+    elif drooping:
+        tip_x = cx + ws * 16
+        tip_y = stem_top_y + 22
+        stem_path = (
+            f"M {cx:.1f} {stem_base_y:.1f} "
+            f"C {cx+sc*ws:.1f} {mid_y+22:.1f}, {cx-4*ws:.1f} {mid_y-8:.1f}, "
+            f"{cx+4*ws:.1f} {stem_top_y+4:.1f} "
+            f"Q {cx+14*ws:.1f} {stem_top_y+8:.1f} {tip_x:.1f} {tip_y:.1f}"
+        )
+        crown_x, crown_y = tip_x, tip_y
+    elif wilted:
+        tip_x = cx + ws * 6
+        tip_y = stem_top_y + 4
+        stem_path = (
+            f"M {cx:.1f} {stem_base_y:.1f} "
+            f"C {cx+sc*ws:.1f} {mid_y+18:.1f}, {cx-sc*ws:.1f} {mid_y-14:.1f}, "
+            f"{tip_x:.1f} {tip_y:.1f}"
+        )
+        crown_x, crown_y = tip_x, tip_y
+    else:
+        stem_path = (
+            f"M {cx:.1f} {stem_base_y:.1f} "
+            f"C {cx+sc*ws:.1f} {mid_y+22:.1f}, {cx-sc*ws:.1f} {mid_y-22:.1f}, {cx:.1f} {stem_top_y:.1f}"
+        )
+
+    stem_color = "#8a6a3f" if broken else "#9aa37c" if drooping else "var(--leaf-400)"
+
+    green_pal  = ["var(--leaf-500)", "var(--leaf-300)", "var(--leaf-200)"]
+    yellow_pal = ["var(--leaf-400)", "#c9b76b", "#d8c97d"]
+    brown_pal  = ["#9aa37c", "#a3956b", "#8a6a3f"]
+    palette = brown_pal if (broken or drooping) else yellow_pal if wilted else green_pal
+
+    usable = max(3, min(8, leaves + 1))
+    fallen_count = (
+        min(usable - 1, 3) if broken else
+        min(usable - 1, 2) if drooping else
+        1 if wilted else 0
     )
+    attached = max(2, usable - fallen_count)
 
     leaf_parts: List[str] = []
-    usable = max(1, min(8, leaves))
-    leaf_palette = ["var(--leaf-500)", "var(--leaf-300)", "var(--leaf-200)"]
-    for i in range(usable):
-        t = 0.15 + (i / max(usable - 1, 1)) * 0.7
-        y = stem_base + (stem_top - stem_base) * t
+    for i in range(attached):
+        t = 0.12 + (i / max(attached - 1, 1)) * 0.62
+        t_eff = t * 0.55 if broken else t
+        y = stem_base_y + (stem_top_y - stem_base_y) * t_eff
         side = -1 if i % 2 == 0 else 1
-        leaf_size = 16 + (i / usable) * 3
-        x = cx + math.sin(t * math.pi) * stem_curve * wobble * 0.6
-        fill = leaf_palette[i % 3]
-        angle = side * (32 + i * 3)
+        lsz = 14 + (i / usable) * 4
+        lx = cx + math.sin(t * math.pi) * sc * ws * 0.6
+        fill = palette[i % 3]
+        angle = side * (32 + i * 3) + side * (18 if wilted else 0) + side * (14 if drooping else 0)
+        curl_y = lsz * 0.7 if wilted else -lsz * 0.55
         leaf_parts.append(
-            f'<g transform="translate({x:.1f} {y:.1f}) rotate({angle})">'
-            f'<path d="M 0 0 Q {side * leaf_size * 0.55:.1f} {-leaf_size * 0.55:.1f} '
-            f'{side * leaf_size:.1f} 0 Q {side * leaf_size * 0.55:.1f} {leaf_size * 0.55:.1f} 0 0 Z" '
-            f'fill="{fill}" />'
-            f'<line x1="0" y1="0" x2="{side * leaf_size:.1f}" y2="0" '
-            f'stroke="rgba(255,255,255,0.22)" stroke-width="0.7" />'
+            f'<g transform="translate({lx:.1f} {y:.1f}) rotate({angle})">'
+            f'<path d="M 0 0 Q {side*lsz*0.55:.1f} {curl_y:.1f} {side*lsz:.1f} 0 '
+            f'Q {side*lsz*0.55:.1f} {lsz*0.55:.1f} 0 0 Z" fill="{fill}" />'
+            f'<line x1="0" y1="0" x2="{side*lsz:.1f}" y2="0" stroke="rgba(255,255,255,0.22)" stroke-width="0.7" />'
             f'</g>'
         )
 
-    sev_c = _sev_class(sev)
-    bloom_accent = {
-        "critical": "var(--sev-4)",
-        "hot":      "var(--sev-3)",
-        "warm":     "var(--sun)",
-        "cool":     "var(--leaf-300)",
-    }[sev_c]
+    fallen_parts: List[str] = []
+    for i in range(fallen_count):
+        fx = cx + (i - fallen_count / 2) * 14 + (seed % 7) - 3
+        fy = stem_base_y + 3
+        rot = ((seed * (i + 1)) % 90) - 45
+        fallen_parts.append(
+            f'<g transform="translate({fx:.1f} {fy:.1f}) rotate({rot})">'
+            f'<path d="M 0 0 Q 5 -3 10 0 Q 5 3 0 0 Z" fill="{palette[(i+1)%3]}" opacity="0.85" /></g>'
+        )
 
-    if bloom or sev_c in ("critical", "hot"):
-        petals = "".join(
-            f'<ellipse cx="0" cy="-11" rx="7" ry="10" transform="rotate({d})" '
-            f'fill="var(--bloom)" stroke="var(--bloom-edge)" stroke-width="0.8" />'
-            for d in (0, 72, 144, 216, 288)
-        )
-        pip = '<circle r="2" fill="var(--bloom)" opacity="{op}" />'.format(
-            op=1 if sev_c == "critical" else 0.6
-        )
-        bloom_svg = (
-            f'<g transform="translate({cx} {stem_top - 4})">'
-            f'{petals}<circle r="5.5" fill="{bloom_accent}" />{pip}</g>'
-        )
+    # Crown — severity-driven, with optional forced bloom for new clusters
+    if sev_c == "cool":
+        if bloom or leaves >= 3:
+            back = "".join(
+                f'<ellipse cx="0" cy="-7" rx="4.5" ry="6.5" transform="rotate({d})" fill="var(--bloom-edge)" />'
+                for d in [36, 108, 180, 252, 324]
+            )
+            front = "".join(
+                f'<ellipse cx="0" cy="-8" rx="5" ry="7.5" transform="rotate({d})" fill="var(--bloom)" stroke="var(--earth-200)" stroke-width="0.7" />'
+                for d in [0, 72, 144, 216, 288]
+            )
+            crown_el = (
+                f'<g transform="translate({crown_x:.1f} {crown_y-4:.1f})" filter="url(#spr-sh-{index})">'
+                f'{back}{front}<circle r="3.2" fill="var(--sun)" /></g>'
+            )
+        else:
+            crown_el = (
+                f'<g transform="translate({crown_x:.1f} {crown_y-2:.1f})">'
+                f'<ellipse cx="0" cy="-3" rx="3.5" ry="5.5" fill="var(--leaf-500)" />'
+                f'<ellipse cx="0" cy="-2" rx="2" ry="3.5" fill="var(--leaf-300)" /></g>'
+            )
     elif sev_c == "warm":
-        spokes = "".join(
-            f'<line x1="0" y1="0" x2="0" y2="-9" transform="rotate({d})" '
-            f'stroke="var(--pollen-600)" stroke-width="0.6" opacity="0.5" />'
-            for d in (0, 45, 90, 135, 180, 225, 270, 315)
+        petals = "".join(
+            f'<ellipse cx="0" cy="-5" rx="4" ry="5.5" transform="rotate({d})" fill="var(--bloom-edge)" stroke="#d8c97d" stroke-width="0.6" />'
+            for d in [200, 270, 340]
         )
-        bloom_svg = (
-            f'<g transform="translate({cx} {stem_top - 4})">'
-            f'<circle r="9" fill="var(--pollen-200)" opacity="0.6" />'
-            f'<circle r="7" fill="var(--sun)" />{spokes}</g>'
+        crown_el = (
+            f'<g transform="translate({crown_x:.1f} {crown_y-2:.1f})">'
+            f'{petals}<circle r="2.8" fill="#c79f2c" /></g>'
         )
-    else:
-        bloom_svg = (
-            f'<g transform="translate({cx} {stem_top - 2})">'
-            f'<ellipse cx="0" cy="-3" rx="4" ry="6" fill="var(--leaf-500)" />'
-            f'<ellipse cx="0" cy="-2" rx="2.5" ry="4" fill="var(--leaf-300)" /></g>'
+    elif sev_c == "hot":
+        crown_el = (
+            f'<g transform="translate({crown_x:.1f} {crown_y:.1f})">'
+            f'<ellipse cx="0" cy="2" rx="6" ry="3" fill="#9aa37c" transform="rotate(20)" />'
+            f'<ellipse cx="2" cy="4" rx="5" ry="2.6" fill="#a3956b" transform="rotate(35)" /></g>'
+        )
+    else:  # critical
+        crown_el = (
+            f'<g transform="translate({crown_x:.1f} {crown_y:.1f})">'
+            f'<path d="M -4 -2 q 4 -3 8 0 q 0 4 -4 4 q -4 0 -4 -4 Z" fill="#8a6a3f" />'
+            f'<path d="M -3 -1 q 3 -2 6 0 q 0 3 -3 3 q -3 0 -3 -3 Z" fill="#6b5a40" /></g>'
         )
 
-    ground = f'<ellipse cx="{cx}" cy="{stem_base + 3}" rx="16" ry="2.4" fill="rgba(201,163,110,0.22)" />'
+    ground_fill = (
+        "rgba(138,106,63,0.35)" if broken else
+        "rgba(201,163,110,0.28)" if drooping else
+        "rgba(201,163,110,0.22)"
+    )
+    ground = f'<ellipse cx="{cx:.1f}" cy="{stem_base_y+3:.1f}" rx="18" ry="2.6" fill="{ground_fill}" />'
+
+    cracks = ""
+    if broken:
+        cracks = (
+            f'<g stroke="#8a6a3f" stroke-width="0.6" opacity="0.6" fill="none">'
+            f'<path d="M {cx-12:.1f} {stem_base_y+5:.1f} L {cx-6:.1f} {stem_base_y+3:.1f} L {cx:.1f} {stem_base_y+5:.1f}" />'
+            f'<path d="M {cx+4:.1f} {stem_base_y+6:.1f} L {cx+10:.1f} {stem_base_y+4:.1f}" /></g>'
+        )
 
     return (
         f'<svg class="plant-svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" aria-hidden="true">'
-        f'{ground}'
-        f'<path d="{stem_path}" fill="none" stroke="var(--leaf-400)" stroke-width="2.4" stroke-linecap="round" />'
+        f'<defs>'
+        f'<filter id="spr-sh-{index}" x="-50%" y="-50%" width="200%" height="200%">'
+        f'<feGaussianBlur in="SourceAlpha" stdDeviation="1.2" />'
+        f'<feOffset dx="0" dy="1.5" />'
+        f'<feComponentTransfer><feFuncA type="linear" slope="0.28" /></feComponentTransfer>'
+        f'<feMerge><feMergeNode /><feMergeNode in="SourceGraphic" /></feMerge>'
+        f'</filter>'
+        f'</defs>'
+        f'{ground}{cracks}'
+        f'<path d="{stem_path}" fill="none" stroke="{stem_color}" stroke-width="2.4" stroke-linecap="round" />'
+        f'{snap_mark}'
         f'{"".join(leaf_parts)}'
-        f'{bloom_svg}'
+        f'{"".join(fallen_parts)}'
+        f'{crown_el}'
         f'</svg>'
     )
 
@@ -280,8 +489,9 @@ def sprout_svg(leaves: int, sev: int, bloom: bool = False, index: int = 0, w: in
 # Computer SVG (port of computers.jsx)
 # ─────────────────────────────────────────────────────────
 
-def computer_svg(host_id: str = "HOST-001", sev: int = 60, index: int = 0, w: int = 108, h: int = 130) -> str:
+def computer_svg(host_id: str = "HOST-001", sev: int = 60, index: int = 0, w: int = 108, h: int = 130, label: bool = False) -> str:
     sev_c = _sev_class(sev)
+    seed = (index * 31 + len(host_id) * 7) % 100
     cx = w / 2
     screen_w = w * 0.72
     screen_h = h * 0.52
@@ -289,15 +499,15 @@ def computer_svg(host_id: str = "HOST-001", sev: int = 60, index: int = 0, w: in
     screen_y = 14
 
     body_fill = {
-        "critical": "#e8d6c0",
-        "hot":      "#ecdfb7",
-        "warm":     "#eadec0",
+        "critical": "#c7b59b",
+        "hot":      "#d5c4a4",
+        "warm":     "#dccfa9",
         "cool":     "#dde7d0",
     }[sev_c]
     screen_fill = {
-        "critical": "#f3c8a8",
-        "hot":      "#f5dca2",
-        "warm":     "#f1e7c1",
+        "critical": "#7a5a3a",
+        "hot":      "#9a7956",
+        "warm":     "#cfc28a",
         "cool":     "#cfe2c2",
     }[sev_c]
     accent = {
@@ -306,16 +516,23 @@ def computer_svg(host_id: str = "HOST-001", sev: int = 60, index: int = 0, w: in
         "warm":     "var(--pollen-600)",
         "cool":     "var(--leaf-500)",
     }[sev_c]
-    led_fill = {
+    led_color = {
         "critical": "var(--sev-4)",
         "hot":      "var(--sev-3)",
         "warm":     "var(--sun)",
         "cool":     "var(--leaf-300)",
     }[sev_c]
 
-    seed = (index * 31 + len(host_id) * 7) % 100
-    eye_shift = (seed % 5) - 2
+    # Tilt — monitor tilts with severity, anchored at stand bottom
+    tilt = {
+        "critical": -10 if seed % 2 == 0 else 10,
+        "hot":      -4  if seed % 2 == 0 else 4,
+        "warm":     -1.5 if seed % 2 == 0 else 1.5,
+        "cool":     0,
+    }[sev_c]
+    y_shift = 6 if sev_c == "critical" else 0
 
+    eye_shift = (seed % 5) - 2
     face_y = screen_y + screen_h * 0.5
     eye_y = face_y - 4
     mouth_y = face_y + 12
@@ -325,6 +542,8 @@ def computer_svg(host_id: str = "HOST-001", sev: int = 60, index: int = 0, w: in
         face = (
             f'<circle cx="{cx - 14 + eye_shift:.1f}" cy="{eye_y:.1f}" r="2.6" fill="var(--ink)" />'
             f'<circle cx="{cx + 14 + eye_shift:.1f}" cy="{eye_y:.1f}" r="2.6" fill="var(--ink)" />'
+            f'<circle cx="{cx - 14 + eye_shift - 0.8:.1f}" cy="{eye_y - 0.8:.1f}" r="0.7" fill="#fff" />'
+            f'<circle cx="{cx + 14 + eye_shift - 0.8:.1f}" cy="{eye_y - 0.8:.1f}" r="0.7" fill="#fff" />'
             f'<circle cx="{cx - 22:.1f}" cy="{eye_y + 6:.1f}" r="1.6" fill="#e69aa1" opacity="0.6" />'
             f'<circle cx="{cx + 22:.1f}" cy="{eye_y + 6:.1f}" r="1.6" fill="#e69aa1" opacity="0.6" />'
             f'<path d="M {cx - 8:.1f} {mouth_y:.1f} Q {cx:.1f} {mouth_y + 5:.1f} {cx + 8:.1f} {mouth_y:.1f}" '
@@ -332,85 +551,159 @@ def computer_svg(host_id: str = "HOST-001", sev: int = 60, index: int = 0, w: in
         )
     elif sev_c == "warm":
         face = (
-            f'<path d="M {cx - 18:.1f} {eye_y:.1f} q 4 -3 8 0" stroke="var(--ink)" stroke-width="1.6" fill="none" stroke-linecap="round" />'
-            f'<path d="M {cx + 10:.1f} {eye_y:.1f} q 4 -3 8 0" stroke="var(--ink)" stroke-width="1.6" fill="none" stroke-linecap="round" />'
-            f'<ellipse cx="{cx:.1f}" cy="{mouth_y:.1f}" rx="3" ry="2.4" fill="var(--ink)" />'
-            f'<text x="{cx + 26:.1f}" y="{face_y - 10:.1f}" font-family="var(--font-display)" font-size="14" font-style="italic" '
-            f'fill="var(--pollen-600)" font-weight="500">z</text>'
-            f'<text x="{cx + 32:.1f}" y="{face_y - 16:.1f}" font-family="var(--font-display)" font-size="10" font-style="italic" '
-            f'fill="var(--pollen-600)" font-weight="500">z</text>'
+            f'<g stroke="var(--ink)" stroke-width="1.6" stroke-linecap="round" fill="none">'
+            f'<path d="M {cx - 18:.1f} {eye_y + 1:.1f} q 4 -3 8 0" />'
+            f'<path d="M {cx + 10:.1f} {eye_y + 1:.1f} q 4 -3 8 0" />'
+            f'<ellipse cx="{cx:.1f}" cy="{mouth_y:.1f}" rx="2.8" ry="2.2" fill="var(--ink)" stroke="none" />'
+            f'<text x="{cx + 26:.1f}" y="{face_y - 8:.1f}" font-family="Newsreader, serif" font-size="13" font-style="italic" '
+            f'fill="var(--pollen-600)" font-weight="500" stroke="none">z</text>'
+            f'</g>'
         )
     elif sev_c == "hot":
         face = (
             f'<circle cx="{cx - 14 + eye_shift:.1f}" cy="{eye_y:.1f}" r="3" fill="var(--ink)" />'
             f'<circle cx="{cx + 14 + eye_shift:.1f}" cy="{eye_y:.1f}" r="3" fill="var(--ink)" />'
-            f'<circle cx="{cx - 14 + eye_shift - 1:.1f}" cy="{eye_y - 1:.1f}" r="0.8" fill="white" />'
-            f'<circle cx="{cx + 14 + eye_shift - 1:.1f}" cy="{eye_y - 1:.1f}" r="0.8" fill="white" />'
-            f'<path d="M {cx - 7:.1f} {mouth_y + 1:.1f} Q {cx:.1f} {mouth_y - 3:.1f} {cx + 7:.1f} {mouth_y + 1:.1f}" '
+            f'<circle cx="{cx - 14 + eye_shift - 1:.1f}" cy="{eye_y - 1:.1f}" r="0.8" fill="#fff" />'
+            f'<circle cx="{cx + 14 + eye_shift - 1:.1f}" cy="{eye_y - 1:.1f}" r="0.8" fill="#fff" />'
+            f'<path d="M {cx - 7:.1f} {mouth_y + 2:.1f} Q {cx:.1f} {mouth_y - 4:.1f} {cx + 7:.1f} {mouth_y + 2:.1f}" '
             f'fill="none" stroke="var(--ink)" stroke-width="1.6" stroke-linecap="round" />'
-            f'<path d="M {cx + 22:.1f} {eye_y - 2:.1f} q -3 5 0 8 q 3 -3 0 -8 Z" fill="var(--water-400)" />'
+            f'<path d="M {cx + 22:.1f} {eye_y - 4:.1f} q -3 6 0 9 q 3 -3 0 -9 Z" fill="var(--water-400)" />'
         )
-    else:  # critical
-        x1l, y1l = cx - 18, eye_y - 3
-        x2l, y2l = cx - 10, eye_y + 3
-        x1r, y1r = cx + 10, eye_y - 3
-        x2r, y2r = cx + 18, eye_y + 3
-        bx = cx + 8
-        by = eye_y - 12
+    else:  # critical — × × eyes, yellow tones, error code
         face = (
-            f'<g stroke="var(--ink)" stroke-width="1.8" stroke-linecap="round">'
-            f'<line x1="{x1l:.1f}" y1="{y1l:.1f}" x2="{x2l:.1f}" y2="{y2l:.1f}" />'
-            f'<line x1="{x1l:.1f}" y1="{y2l:.1f}" x2="{x2l:.1f}" y2="{y1l:.1f}" />'
-            f'<line x1="{x1r:.1f}" y1="{y1r:.1f}" x2="{x2r:.1f}" y2="{y2r:.1f}" />'
-            f'<line x1="{x1r:.1f}" y1="{y2r:.1f}" x2="{x2r:.1f}" y2="{y1r:.1f}" />'
+            f'<g stroke="#f1d36e" stroke-width="2" stroke-linecap="round">'
+            f'<line x1="{cx - 18:.1f}" y1="{eye_y - 3:.1f}" x2="{cx - 10:.1f}" y2="{eye_y + 3:.1f}" />'
+            f'<line x1="{cx - 18:.1f}" y1="{eye_y + 3:.1f}" x2="{cx - 10:.1f}" y2="{eye_y - 3:.1f}" />'
+            f'<line x1="{cx + 10:.1f}" y1="{eye_y - 3:.1f}" x2="{cx + 18:.1f}" y2="{eye_y + 3:.1f}" />'
+            f'<line x1="{cx + 10:.1f}" y1="{eye_y + 3:.1f}" x2="{cx + 18:.1f}" y2="{eye_y - 3:.1f}" />'
             f'</g>'
-            f'<circle cx="{cx:.1f}" cy="{mouth_y + 1:.1f}" r="2.4" fill="none" stroke="var(--ink)" stroke-width="1.4" />'
-            f'<g transform="translate({bx:.1f} {by:.1f}) rotate(-18)">'
-            f'<rect x="-22" y="-3" width="44" height="7" rx="1.5" fill="#fbeede" stroke="#e6cba5" stroke-width="0.5" />'
-            f'<line x1="-14" y1="-3" x2="-14" y2="4" stroke="#e6cba5" stroke-width="0.5" />'
-            f'<line x1="-2" y1="-3" x2="-2" y2="4" stroke="#e6cba5" stroke-width="0.5" />'
-            f'<line x1="10" y1="-3" x2="10" y2="4" stroke="#e6cba5" stroke-width="0.5" />'
-            f'</g>'
+            f'<line x1="{cx - 6:.1f}" y1="{mouth_y + 1:.1f}" x2="{cx + 6:.1f}" y2="{mouth_y + 1:.1f}" '
+            f'stroke="#f1d36e" stroke-width="1.6" stroke-linecap="round" />'
+            f'<text x="{cx:.1f}" y="{mouth_y + 12:.1f}" text-anchor="middle" '
+            f'font-family="JetBrains Mono, monospace" font-size="6" fill="#f1d36e" letter-spacing="0.1em">0x7E</text>'
         )
 
-    # Unique IDs for defs
+    # Screen damage overlays
+    if sev_c == "warm":
+        screen_damage = (
+            f'<g stroke="rgba(0,0,0,0.45)" stroke-width="0.7" fill="none">'
+            f'<path d="M {screen_x + screen_w - 12:.1f} {screen_y + 2:.1f} l 4 5 l -3 3" /></g>'
+        )
+    elif sev_c == "hot":
+        screen_damage = (
+            f'<g stroke="rgba(0,0,0,0.55)" stroke-width="0.9" fill="none" stroke-linejoin="miter">'
+            f'<path d="M {screen_x + 8:.1f} {screen_y + 3:.1f} L {screen_x + 18:.1f} {screen_y + 10:.1f} '
+            f'L {screen_x + 12:.1f} {screen_y + 14:.1f} L {screen_x + 24:.1f} {screen_y + 22:.1f} '
+            f'L {screen_x + 18:.1f} {screen_y + 26:.1f} L {screen_x + 30:.1f} {screen_y + screen_h - 4:.1f}" />'
+            f'<path d="M {screen_x + 18:.1f} {screen_y + 10:.1f} l 4 2" />'
+            f'<path d="M {screen_x + 24:.1f} {screen_y + 22:.1f} l 5 -1" /></g>'
+        )
+    elif sev_c == "critical":
+        screen_damage = (
+            f'<g stroke="rgba(0,0,0,0.65)" stroke-width="0.9" fill="none">'
+            f'<path d="M {screen_x + 6:.1f} {screen_y + 2:.1f} '
+            f'L {screen_x + screen_w * 0.45:.1f} {screen_y + screen_h * 0.4:.1f} '
+            f'L {screen_x + screen_w - 8:.1f} {screen_y + 6:.1f}" />'
+            f'<path d="M {screen_x + screen_w * 0.45:.1f} {screen_y + screen_h * 0.4:.1f} '
+            f'L {screen_x + 12:.1f} {screen_y + screen_h - 4:.1f}" />'
+            f'<path d="M {screen_x + screen_w * 0.45:.1f} {screen_y + screen_h * 0.4:.1f} '
+            f'L {screen_x + screen_w - 6:.1f} {screen_y + screen_h - 8:.1f}" />'
+            f'<path d="M {screen_x + screen_w * 0.45:.1f} {screen_y + screen_h * 0.4:.1f} '
+            f'L {screen_x + screen_w * 0.65:.1f} {screen_y + 4:.1f}" /></g>'
+            f'<g stroke="rgba(241,211,110,0.55)" stroke-width="1.2">'
+            f'<line x1="{screen_x + 6:.1f}" y1="{screen_y + screen_h - 14:.1f}" '
+            f'x2="{screen_x + screen_w - 14:.1f}" y2="{screen_y + screen_h - 14:.1f}" />'
+            f'<line x1="{screen_x + 14:.1f}" y1="{screen_y + screen_h - 8:.1f}" '
+            f'x2="{screen_x + screen_w - 6:.1f}" y2="{screen_y + screen_h - 8:.1f}" /></g>'
+        )
+    else:
+        screen_damage = ""
+
+    # Smoke wisps from screen top
+    if sev_c in ("hot", "critical"):
+        n_wisps = 3 if sev_c == "critical" else 2
+        opacity = 0.55 if sev_c == "critical" else 0.4
+        wisps = []
+        for i in range(n_wisps):
+            sx = screen_x + screen_w * (0.2 + i * 0.3)
+            sy = screen_y - 4
+            sw = 2.2 - i * 0.3
+            wisps.append(
+                f'<path d="M {sx:.1f} {sy:.1f} c -3 -4, 3 -8, 0 -12 c -3 -4, 3 -8, 0 -12" '
+                f'fill="none" stroke="#7a7268" stroke-width="{sw:.1f}" stroke-linecap="round" '
+                f'transform="translate(0 {i * -2})" />'
+            )
+        smoke = f'<g opacity="{opacity}">{"".join(wisps)}</g>'
+    else:
+        smoke = ""
+
+    # Sparks for critical
+    sparks = (
+        f'<g fill="#f1d36e">'
+        f'<circle cx="{cx + 26:.1f}" cy="{screen_y - 2:.1f}" r="1.2" />'
+        f'<circle cx="{cx + 30:.1f}" cy="{screen_y - 6:.1f}" r="0.8" opacity="0.7" />'
+        f'<circle cx="{cx - 28:.1f}" cy="{screen_y - 4:.1f}" r="1" opacity="0.8" /></g>'
+    ) if sev_c == "critical" else ""
+
+    # Stand cracks for critical
+    stand_cracks = (
+        f'<g stroke="#6b5a40" stroke-width="0.6" opacity="0.6">'
+        f'<line x1="{cx - 12:.1f}" y1="{h - 16:.1f}" x2="{cx + 2:.1f}" y2="{h - 14:.1f}" />'
+        f'<line x1="{cx + 4:.1f}" y1="{h - 14:.1f}" x2="{cx + 14:.1f}" y2="{h - 16:.1f}" /></g>'
+    ) if sev_c == "critical" else ""
+
+    # LED blink — faster for critical
+    led_dur = "0.8s" if sev_c == "critical" else "1.6s"
+    led_blink = (
+        f'<animate attributeName="opacity" values="1;0.3;1" dur="{led_dur}" repeatCount="indefinite" />'
+        if sev_c != "cool" else ""
+    )
+
+    # Optional host-id label
+    label_el = (
+        f'<text x="{cx:.1f}" y="{h - 28:.1f}" text-anchor="middle" '
+        f'font-family="var(--font-mono)" font-size="9" letter-spacing="0.06em" '
+        f'fill="var(--ink-soft)" font-weight="600">{html.escape(host_id)}</text>'
+    ) if label else ""
+
     safe_id = html.escape(host_id).replace(" ", "_").replace("-", "_")
     scan_id = f"scan_{index}_{safe_id}"
     shadow_id = f"shadow_{index}_{safe_id}"
 
-    led_blink = (
-        f'<animate attributeName="opacity" values="1;0.3;1" dur="1.6s" repeatCount="indefinite" />'
-        if sev_c != "cool" else ""
-    )
-
     return (
         f'<svg class="computer-svg sym-{sev_c}" width="{w}" height="{h}" viewBox="0 0 {w} {h}" aria-hidden="true">'
         f'<defs>'
-        f'  <pattern id="{scan_id}" width="2" height="2" patternUnits="userSpaceOnUse">'
-        f'    <rect width="2" height="2" fill="{screen_fill}" />'
-        f'    <line x1="0" y1="0.5" x2="2" y2="0.5" stroke="rgba(0,0,0,0.05)" stroke-width="0.4" />'
-        f'  </pattern>'
-        f'  <filter id="{shadow_id}" x="-30%" y="-30%" width="160%" height="160%">'
-        f'    <feGaussianBlur in="SourceAlpha" stdDeviation="2" />'
-        f'    <feOffset dx="0" dy="2" />'
-        f'    <feComponentTransfer><feFuncA type="linear" slope="0.18" /></feComponentTransfer>'
-        f'    <feMerge><feMergeNode /><feMergeNode in="SourceGraphic" /></feMerge>'
-        f'  </filter>'
+        f'<pattern id="{scan_id}" width="2" height="2" patternUnits="userSpaceOnUse">'
+        f'<rect width="2" height="2" fill="{screen_fill}" />'
+        f'<line x1="0" y1="0.5" x2="2" y2="0.5" stroke="rgba(0,0,0,0.05)" stroke-width="0.4" /></pattern>'
+        f'<filter id="{shadow_id}" x="-30%" y="-30%" width="160%" height="160%">'
+        f'<feGaussianBlur in="SourceAlpha" stdDeviation="2" />'
+        f'<feOffset dx="0" dy="2" />'
+        f'<feComponentTransfer><feFuncA type="linear" slope="0.18" /></feComponentTransfer>'
+        f'<feMerge><feMergeNode /><feMergeNode in="SourceGraphic" /></feMerge></filter>'
         f'</defs>'
-        f'<ellipse cx="{cx:.1f}" cy="{h - 6}" rx="{w * 0.32:.1f}" ry="3" fill="rgba(60,60,60,0.08)" />'
+        # ground shadow
+        f'<ellipse cx="{cx:.1f}" cy="{h - 6}" rx="{w * 0.32:.1f}" ry="3" fill="rgba(60,60,60,0.10)" />'
+        # stand — fixed, does not tilt
         f'<rect x="{cx - 18:.1f}" y="{h - 22}" width="36" height="10" rx="2" '
         f'fill="{body_fill}" stroke="{accent}" stroke-opacity="0.25" stroke-width="1" />'
         f'<rect x="{cx - 28:.1f}" y="{h - 12}" width="56" height="6" rx="1.5" '
         f'fill="{body_fill}" stroke="{accent}" stroke-opacity="0.25" stroke-width="1" />'
+        f'{stand_cracks}'
+        # monitor body + screen, tilted
+        f'<g transform="translate(0 {y_shift}) rotate({tilt:.1f} {cx:.1f} {h - 22})">'
+        f'{smoke}{sparks}'
         f'<g filter="url(#{shadow_id})">'
-        f'  <rect x="{screen_x - 8:.1f}" y="{screen_y - 8}" width="{screen_w + 16:.1f}" height="{screen_h + 22:.1f}" '
-        f'  rx="10" fill="{body_fill}" stroke="rgba(0,0,0,0.12)" stroke-width="0.6" />'
-        f'</g>'
+        f'<rect x="{screen_x - 8:.1f}" y="{screen_y - 8}" width="{screen_w + 16:.1f}" height="{screen_h + 22:.1f}" '
+        f'rx="10" fill="{body_fill}" stroke="rgba(0,0,0,0.12)" stroke-width="0.6" /></g>'
         f'<rect x="{screen_x:.1f}" y="{screen_y}" width="{screen_w:.1f}" height="{screen_h:.1f}" '
         f'rx="6" fill="url(#{scan_id})" stroke="rgba(0,0,0,0.18)" stroke-width="0.6" />'
         f'{face}'
-        f'<circle cx="{screen_x + screen_w - 5:.1f}" cy="{screen_y + screen_h + 7:.1f}" r="1.4" fill="{led_fill}">'
+        f'{screen_damage}'
+        f'<circle cx="{screen_x + screen_w - 5:.1f}" cy="{screen_y + screen_h + 7:.1f}" r="1.4" fill="{led_color}">'
         f'{led_blink}</circle>'
+        f'</g>'
+        f'{label_el}'
         f'</svg>'
     )
 
@@ -457,9 +750,11 @@ def render_workshop(clusters: List[Dict]) -> None:
             f'</div>'
         )
 
+    scene = _meadow_scene_svg(w=900, h=110, seed=sum(ord(c) for c in "workshop"))
     st.markdown(
         f"""
         <section class="workshop-wrap">
+          {scene}
           <div class="workshop-head">
             <div>
               <p class="eyebrow" style="color: var(--leaf-500)">The Workshop</p>
@@ -558,9 +853,11 @@ def render_meadow(clusters: List[Dict]) -> None:
             f'<div class="plant-card"><span class="name">{name}</span>'
             f'<span class="meta">{meta}</span></div></div>'
         )
+    scene = _meadow_scene_svg(w=900, h=110, seed=sum(ord(c) for c in "meadow"))
     st.markdown(
         f"""
         <section class="meadow-wrap">
+          {scene}
           <div class="meadow-head">
             <div>
               <p class="eyebrow" style="color: var(--leaf-500)">The Meadow</p>
@@ -789,12 +1086,102 @@ def render_host_view(store, run_id: str, host_id: str, fleet: Dict) -> None:
         st.info("No incidents detected for this host.")
 
     events = timeline.get("events", [])
+    win = timeline.get("window") or {}
+    win_start_str = win.get("start") or timeline.get("window_start") or ""
+    try:
+        win_start_dt = datetime.fromisoformat(win_start_str.replace("Z", "+00:00"))
+        if win_start_dt.tzinfo is None:
+            win_start_dt = win_start_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        win_start_dt = datetime.now(timezone.utc) - timedelta(hours=24)
+
     if events:
+        # Branch-and-bud SVG timeline
+        strip_w = 800
+        branch_svg_h = 180
+        bud_rows: List[str] = []
+        for ev in events[:40]:
+            ts = ev.get("ts", "")
+            level = ev.get("level", "")
+            msg = html.escape(ev.get("message", "")[:50])
+            hour = _parse_event_hour(ts, win_start_dt)
+            x = (hour / 24.0) * strip_w
+            is_err = level in ("Error", "Critical", "Warning")
+            y = 55 if is_err else 130
+            if is_err:
+                petals = "".join(
+                    f'<ellipse cx="0" cy="-9" rx="5.5" ry="8" transform="rotate({d})" '
+                    f'fill="var(--bloom)" stroke="var(--bloom-edge)" stroke-width="0.8" />'
+                    for d in [0, 72, 144, 216, 288]
+                )
+                bud_rows.append(
+                    f'<g transform="translate({x:.1f} {y})">'
+                    f'{petals}'
+                    f'<circle r="4" fill="var(--sev-3)" />'
+                    f'<circle r="1.4" fill="var(--bloom)" />'
+                    f'<title>{msg}</title>'
+                    f'</g>'
+                )
+            else:
+                bud_rows.append(
+                    f'<circle cx="{x:.1f}" cy="{y}" r="5" fill="var(--leaf-400)" opacity="0.8">'
+                    f'<title>{msg}</title></circle>'
+                    f'<circle cx="{x:.1f}" cy="{y}" r="9" fill="var(--leaf-300)" opacity="0.15" />'
+                )
+
+        leaf_positions = [0.06, 0.13, 0.22, 0.34, 0.46, 0.58, 0.68, 0.79, 0.88, 0.95]
+        leaf_colors    = ["var(--leaf-300)", "var(--leaf-400)", "var(--leaf-200)", "var(--leaf-300)", "var(--leaf-400)",
+                          "var(--leaf-300)", "var(--leaf-200)", "var(--leaf-400)", "var(--leaf-300)", "var(--leaf-400)"]
+        leaf_sides     = [-1, 1, -1, 1, -1, 1, -1, 1, -1, 1]
+        leaf_sizes     = [14, 16, 13, 15, 17, 14, 15, 16, 13, 15]
+        branch_leaves = ""
+        for lp, lc, ls, lsz in zip(leaf_positions, leaf_colors, leaf_sides, leaf_sizes):
+            lx = lp * strip_w
+            ly = 105 + math.sin(lp * 6) * 2
+            ly_off = ls * 14
+            lang = ls * (38 + leaf_positions.index(lp) % 3 * 6)
+            branch_leaves += (
+                f'<g>'
+                f'<line x1="{lx:.1f}" y1="{ly:.1f}" x2="{lx + ls*4:.1f}" y2="{ly + ly_off:.1f}" '
+                f'stroke="var(--earth-600)" stroke-width="0.8" opacity="0.5" />'
+                f'<g transform="translate({lx + ls*4:.1f} {ly + ly_off:.1f}) rotate({lang})">'
+                f'<path d="M 0 0 Q {ls*lsz*0.55:.1f} {-lsz*0.55:.1f} {ls*lsz:.1f} 0 '
+                f'Q {ls*lsz*0.55:.1f} {lsz*0.55:.1f} 0 0 Z" fill="{lc}" />'
+                f'<line x1="0" y1="0" x2="{ls*lsz:.1f}" y2="0" stroke="rgba(255,255,255,0.25)" stroke-width="0.6" />'
+                f'</g></g>'
+            )
+
+        hours_row = "".join(
+            f'<span>{str(hr).zfill(2)}:00</span>'
+            for hr in [0, 4, 8, 12, 16, 20, 24]
+        )
+        branch_svg = (
+            f'<svg viewBox="0 0 {strip_w} {branch_svg_h}" preserveAspectRatio="none" '
+            f'width="100%" height="{branch_svg_h}" style="position:absolute;inset:0;top:10px" aria-hidden="true">'
+            f'<defs>'
+            f'<linearGradient id="branch-grad-{host_id.replace("-","_")}" x1="0" x2="1" y1="0" y2="0">'
+            f'<stop offset="0%" stop-color="var(--earth-200)" />'
+            f'<stop offset="50%" stop-color="var(--earth-400)" />'
+            f'<stop offset="100%" stop-color="var(--earth-200)" /></linearGradient>'
+            f'</defs>'
+            f'<path d="M 0 110 Q {strip_w*0.25:.0f} 90, {strip_w*0.5:.0f} 108 T {strip_w} 100" '
+            f'fill="none" stroke="url(#branch-grad-{host_id.replace("-","_")})" '
+            f'stroke-width="4" stroke-linecap="round" />'
+            f'{branch_leaves}'
+            f'{"".join(bud_rows)}'
+            f'</svg>'
+        )
         st.markdown(
-            '<p class="eyebrow" style="margin-top:24px;color:var(--ink-faint)">Recent events (sample)</p>',
+            f'<p class="eyebrow" style="margin-top:24px;color:var(--ink-faint)">24h event timeline · {len(events)} events</p>',
             unsafe_allow_html=True,
         )
-        st.dataframe(pd.DataFrame(events).head(50), use_container_width=True)
+        st.markdown(
+            f'<div class="branch-wrap" style="position:relative;height:{branch_svg_h + 20}px;overflow:hidden;border-radius:10px;background:var(--linen);">'
+            f'{branch_svg}'
+            f'<div class="hours" style="position:absolute;bottom:6px;left:0;right:0;display:flex;justify-content:space-between;padding:0 8px;font-size:10px;color:var(--ink-faint);font-family:var(--font-mono);">'
+            f'{hours_row}</div></div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ─────────────────────────────────────────────────────────
