@@ -148,7 +148,33 @@ def inject_css() -> None:
     here = Path(__file__).parent
     base = (here / "kevat.css").read_text(encoding="utf-8")
     over = (here / "streamlit-overrides.css").read_text(encoding="utf-8")
-    st.markdown(f"<style>{base}\n{over}</style>", unsafe_allow_html=True)
+    cluster_nav_css = """
+.kv-cluster-nav button {
+    background: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 6px 0 !important;
+    font-family: var(--font-body) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: var(--ink) !important;
+    text-align: left !important;
+    width: 100% !important;
+    cursor: pointer !important;
+    transition: color 0.15s !important;
+}
+.kv-cluster-nav button:hover {
+    color: var(--leaf-600, #3d6b4a) !important;
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+.kv-cluster-nav button[data-selected="true"] {
+    color: var(--leaf-500) !important;
+}
+"""
+    st.markdown(f"<style>{base}\n{over}\n{cluster_nav_css}</style>", unsafe_allow_html=True)
     st.markdown(
         """
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -899,8 +925,39 @@ def _type_icon(t: str, color: str = "currentColor") -> str:
 
 
 def render_cluster_ledger(clusters: List[Dict]) -> None:
-    rows = []
+    workshop = _is_workshop()
+    eyebrow = "Issue log" if workshop else "Cluster ledger"
+    heading = "What&#39;s running hot" if workshop else "What&#39;s growing"
+    col_item = "Issue" if workshop else "Cluster"
+    col_hosts = "Machines" if workshop else "Hosts"
+    col_sev = "Heat" if workshop else "Severity"
+    col_status = "State" if workshop else "Status"
+
+    selected_hash = st.session_state.get("selected_cluster")
+
+    st.markdown(
+        f"""
+        <section class="card" style="margin-top: 24px;">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">{eyebrow}</p>
+              <h2 style="font-family: var(--font-display); font-style: italic; font-weight: 500;">{heading}</h2>
+            </div>
+          </div>
+          <div class="cluster-list">
+            <div class="cluster-row head" style="display:grid;grid-template-columns:28px 1fr 80px 120px 110px;">
+              <span></span><span>{col_item}</span><span>{col_hosts}</span>
+              <span>{col_sev}</span><span>{col_status}</span>
+            </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="kv-cluster-nav">', unsafe_allow_html=True)
+
     for c in clusters:
+        sig_hash = c.get("signature_hash", "")
+        sig_key = c.get("signature_key") or sig_hash[:12]
         sev_class = _sev_class(c.get("severity", 0))
         bar_pct = min(100, (c.get("severity", 0) / 120) * 100)
         accent = {
@@ -913,62 +970,78 @@ def render_cluster_ledger(clusters: List[Dict]) -> None:
         example = c.get("example_hosts", [])
         hosts_label = ", ".join(example[:3]) + ("…" if len(example) > 3 else "")
         status = c.get("status", "ongoing")
-        workshop = _is_workshop()
         status_label = ("New issue" if workshop else "Sprouting today") if status == "new" else ("Running" if workshop else "Ongoing")
         status_dot_color = "var(--leaf-400)" if status == "new" else "var(--sun)"
         inc_type = c.get("type") or "bsod"
-        sig_key = c.get("signature_key") or c.get("signature_hash", "")[:12]
-        rows.append(f"""
-          <div class="cluster-row">
-            <span style="color: {accent}; display: flex;">{_type_icon(inc_type, accent)}</span>
-            <div class="title">
-              <strong>{html.escape(sig_key[:48])}</strong>
-              <span class="sub">{html.escape(c.get("signature_hash", "")[:12])}</span>
-            </div>
-            <span class="hosts">
-              <span style="font-family: var(--font-display); font-size: 20px; line-height: 1; color: var(--ink); font-weight: 500;">{n_hosts}</span>
-              <span style="font-size: 11px; color: var(--ink-faint);">{html.escape(hosts_label)}</span>
-            </span>
-            <div class="severity-bar {sev_class}"><i style="width: {bar_pct:.0f}%"></i></div>
-            <span class="status-pill {status}">
-              <span style="width:6px;height:6px;border-radius:50%;background:{status_dot_color};"></span>
-              {status_label}
-            </span>
-            <span style="color: var(--ink-faint); text-align: right; font-size: 18px;">›</span>
-          </div>
-        """)
-    workshop = _is_workshop()
-    eyebrow = "Issue log" if workshop else "Cluster ledger"
-    heading = "What&#39;s running hot" if workshop else "What&#39;s growing"
-    col_item = "Issue" if workshop else "Cluster"
-    col_hosts = "Machines" if workshop else "Hosts"
-    col_sev = "Heat" if workshop else "Severity"
-    col_status = "State" if workshop else "Status"
-    st.markdown(
-        f"""
-        <section class="card" style="margin-top: 24px;">
-          <div class="card-head">
-            <div>
-              <p class="eyebrow">{eyebrow}</p>
-              <h2 style="font-family: var(--font-display); font-style: italic; font-weight: 500;">{heading}</h2>
-            </div>
-          </div>
-          <div class="cluster-list">
-            <div class="cluster-row head">
-              <span></span><span>{col_item}</span><span>{col_hosts}</span>
-              <span>{col_sev}</span><span>{col_status}</span><span></span>
-            </div>
-            {"".join(rows)}
-          </div>
-        </section>
-        """,
-        unsafe_allow_html=True,
-    )
+        is_selected = sig_hash == selected_hash
+
+        col_i, col_t, col_h, col_b, col_s = st.columns([0.4, 4, 1.2, 2, 2])
+        with col_i:
+            st.markdown(
+                f'<div style="padding-top:10px;color:{accent}">{_type_icon(inc_type, accent)}</div>',
+                unsafe_allow_html=True,
+            )
+        with col_t:
+            label = ("◉  " if is_selected else "") + sig_key[:48]
+            if st.button(label, key=f"cl_{sig_hash}", use_container_width=True):
+                if is_selected:
+                    st.session_state.pop("selected_cluster", None)
+                else:
+                    st.session_state["selected_cluster"] = sig_hash
+                st.rerun()
+            st.markdown(
+                f'<div style="font-size:11px;color:var(--ink-faint);margin-top:-6px;padding-left:1px">'
+                f'{html.escape(sig_hash[:12])}</div>',
+                unsafe_allow_html=True,
+            )
+        with col_h:
+            st.markdown(
+                f'<div style="padding-top:8px;font-size:18px;font-weight:500;color:var(--ink);line-height:1.2">'
+                f'{n_hosts}<br>'
+                f'<span style="font-size:11px;color:var(--ink-faint)">{html.escape(hosts_label)}</span></div>',
+                unsafe_allow_html=True,
+            )
+        with col_b:
+            st.markdown(
+                f'<div style="padding-top:16px">'
+                f'<div class="severity-bar {sev_class}"><i style="width:{bar_pct:.0f}%"></i></div></div>',
+                unsafe_allow_html=True,
+            )
+        with col_s:
+            st.markdown(
+                f'<div style="padding-top:10px">'
+                f'<span class="status-pill {status}">'
+                f'<span style="width:6px;height:6px;border-radius:50%;background:{status_dot_color};'
+                f'display:inline-block;margin-right:4px;vertical-align:middle;"></span>'
+                f'{status_label}</span></div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            '<div style="border-top:1px solid var(--leaf-50,#eef2e8);margin:0 0 2px 0"></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('</div></div></section>', unsafe_allow_html=True)
 
 
-def render_hosts_grid(hosts: List[Dict]) -> None:
+def render_hosts_grid(hosts: List[Dict], selected_cluster: Dict | None = None) -> None:
+    # Filter to cluster's example_hosts when a cluster is selected
+    filter_ids: set | None = None
+    filter_label = ""
+    if selected_cluster:
+        example = selected_cluster.get("example_hosts", [])
+        if example:
+            filter_ids = set(example)
+            sig_key = selected_cluster.get("signature_key") or selected_cluster.get("signature_hash", "")[:12]
+            filter_label = html.escape(sig_key[:48])
+
+    if filter_ids is not None:
+        display_hosts = [h for h in hosts if h.get("host_id") in filter_ids]
+    else:
+        display_hosts = hosts
+
     cards = []
-    for h in hosts[:12]:
+    for h in display_hosts[:12]:
         sev_c = _sev_class(h.get("score", 0))
         score = h.get("score", 0)
         reasons = h.get("reasons", [])
@@ -987,13 +1060,26 @@ def render_hosts_grid(hosts: List[Dict]) -> None:
             f'  <div class="types">{tags}</div>'
             f'</div>'
         )
+
+    eyebrow = "Top impacted hosts"
+    if filter_label:
+        eyebrow = f'Hosts · <span style="color:var(--leaf-500)">{filter_label}</span>'
+    heading = "Hosts needing attention" if not filter_ids else f"{len(display_hosts)} host{'s' if len(display_hosts) != 1 else ''} in this cluster"
+
+    if filter_ids is not None:
+        col_head, col_clear = st.columns([6, 1])
+        with col_clear:
+            if st.button("Show all", key="clear_cluster_filter"):
+                st.session_state.pop("selected_cluster", None)
+                st.rerun()
+
     st.markdown(
         f"""
         <section class="card" style="margin-top: 24px;">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Top impacted hosts</p>
-              <h2 style="font-family: var(--font-display); font-style: italic; font-weight: 500;">Hosts needing attention</h2>
+              <p class="eyebrow">{eyebrow}</p>
+              <h2 style="font-family: var(--font-display); font-style: italic; font-weight: 500;">{heading}</h2>
             </div>
           </div>
           <div class="hosts-grid">{"".join(cards)}</div>
@@ -1432,8 +1518,11 @@ def main() -> None:
             render_workshop(fleet.get("clusters", []))
         else:
             render_meadow(fleet.get("clusters", []))
-        render_cluster_ledger(fleet.get("clusters", []))
-        render_hosts_grid(fleet.get("top_hosts", []))
+        clusters = fleet.get("clusters", [])
+        render_cluster_ledger(clusters)
+        selected_hash = st.session_state.get("selected_cluster")
+        selected_cluster = next((c for c in clusters if c.get("signature_hash") == selected_hash), None)
+        render_hosts_grid(fleet.get("top_hosts", []), selected_cluster=selected_cluster)
 
     with tab_host:
         host_options = _host_options(store, run_id, fleet)
