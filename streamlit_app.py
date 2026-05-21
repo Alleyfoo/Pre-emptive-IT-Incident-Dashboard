@@ -285,7 +285,7 @@ def _meadow_scene_svg(w: int = 900, h: int = 110, seed: int = 0) -> str:
     )
 
     return (
-        f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" '
+        f'<svg width="100%" height="{h}" viewBox="0 0 {w} {h}" preserveAspectRatio="xMidYMid slice" '
         f'style="display:block;border-radius:12px 12px 0 0;overflow:hidden" aria-hidden="true">'
         f'{sky}{sun}{hills}{trees_svg}{flowers_svg}'
         f'</svg>'
