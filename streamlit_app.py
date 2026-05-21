@@ -16,6 +16,7 @@ from typing import Dict, List
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime, timedelta, timezone
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -315,6 +316,172 @@ def _meadow_scene_svg(w: int = 900, h: int = 110, seed: int = 0) -> str:
         f'style="display:block;border-radius:12px 12px 0 0;overflow:hidden" aria-hidden="true">'
         f'{sky}{sun}{hills}{trees_svg}{flowers_svg}'
         f'</svg>'
+    )
+
+
+# ─────────────────────────────────────────────────────────
+# Workshop scene HTML (port of scenes.jsx WorkshopStripe)
+# ─────────────────────────────────────────────────────────
+
+def _workshop_scene_html(h: int = 110) -> str:
+    """Workbench scene: pegboard wall, desk edge, tool items."""
+    s = "var(--ink-soft)"
+    desk_y = int(h * 0.65)
+    peg_h = int(h * 0.5)
+
+    def _lamp():
+        return (
+            f'<svg viewBox="-12 -16 24 24" width="24" height="24">'
+            f'<path d="M -8 -4 L 8 -4 L 5 -1 L -5 -1 Z" fill="var(--pollen-200)" stroke="{s}" stroke-width="0.6" />'
+            f'<line x1="0" y1="-1" x2="0" y2="6" stroke="{s}" stroke-width="0.6" />'
+            f'<ellipse cx="0" cy="6" rx="3" ry="0.8" fill="var(--earth-400)" />'
+            f'<ellipse cx="0" cy="-4" rx="6" ry="2" fill="var(--sun)" opacity="0.4" /></svg>'
+        )
+
+    def _mug():
+        return (
+            f'<svg viewBox="-7 -10 14 14" width="22" height="22">'
+            f'<rect x="-4" y="-6" width="8" height="7" rx="0.6" fill="var(--paper)" stroke="{s}" stroke-width="0.5" />'
+            f'<ellipse cx="0" cy="-6" rx="4" ry="0.9" fill="#6b4a2a" />'
+            f'<path d="M 4 -4.5 q 2 -0.3 2 1.5 q 0 1.5 -2 1.5" fill="none" stroke="{s}" stroke-width="0.5" />'
+            f'<path d="M -1.5 -7.5 q 0.5 -1.2 0 -2.4" fill="none" stroke="var(--ink-faint)" stroke-width="0.4" opacity="0.6" />'
+            f'<path d="M 1.5 -8 q 0.5 -1.2 0 -2.4" fill="none" stroke="var(--ink-faint)" stroke-width="0.4" opacity="0.5" /></svg>'
+        )
+
+    def _notebook():
+        return (
+            f'<svg viewBox="-7 -7 14 12" width="22" height="20">'
+            f'<rect x="-6" y="-4" width="12" height="7" rx="0.5" fill="var(--earth-200)" stroke="var(--earth-400)" stroke-width="0.4" transform="rotate(-4)" />'
+            f'<line x1="-4" y1="-1.6" x2="3" y2="-2" stroke="var(--ink-faint)" stroke-width="0.35" transform="rotate(-4)" />'
+            f'<line x1="-4" y1="0.3" x2="2" y2="-0.1" stroke="var(--ink-faint)" stroke-width="0.35" transform="rotate(-4)" /></svg>'
+        )
+
+    def _paperclip():
+        return (
+            f'<svg viewBox="-5 -6 10 12" width="14" height="18" stroke="{s}" stroke-width="0.55" fill="none">'
+            f'<path d="M -2 -4 L -2 3 q 0 1 1 1 q 1 0 1 -1 L 0 -3 q 0 -0.6 0.6 -0.6 q 0.6 0 0.6 0.6 L 1.2 3.5" transform="rotate(18)" /></svg>'
+        )
+
+    def _sticky():
+        return (
+            f'<svg viewBox="-6 -6 12 12" width="22" height="22">'
+            f'<rect x="-5" y="-5" width="10" height="10" rx="0.3" fill="var(--pollen-200)" stroke="var(--earth-200)" stroke-width="0.3" transform="rotate(6)" />'
+            f'<line x1="-3" y1="-2" x2="2.5" y2="-2" stroke="var(--earth-600)" stroke-width="0.3" opacity="0.6" transform="rotate(6)" />'
+            f'<line x1="-3" y1="-0.3" x2="3" y2="-0.3" stroke="var(--earth-600)" stroke-width="0.3" opacity="0.6" transform="rotate(6)" />'
+            f'<line x1="-3" y1="1.4" x2="2" y2="1.4" stroke="var(--earth-600)" stroke-width="0.3" opacity="0.6" transform="rotate(6)" /></svg>'
+        )
+
+    def _screws():
+        dots = "".join(
+            f'<g transform="translate({x} 0)">'
+            f'<circle r="1.2" fill="var(--ink-soft)" />'
+            f'<path d="M -0.7 0 L 0.7 0" stroke="var(--paper)" stroke-width="0.3" /></g>'
+            for x in [-3.5, 0, 3.5]
+        )
+        return f'<svg viewBox="-6 -3 12 6" width="22" height="10">{dots}</svg>'
+
+    def _tape():
+        return (
+            f'<svg viewBox="-6 -6 12 12" width="22" height="22">'
+            f'<circle r="4.5" fill="var(--water-200)" stroke="{s}" stroke-width="0.4" />'
+            f'<circle r="1.5" fill="var(--paper)" stroke="{s}" stroke-width="0.3" /></svg>'
+        )
+
+    def _plant():
+        return (
+            f'<svg viewBox="-7 -10 14 14" width="22" height="22">'
+            f'<path d="M -3 0 L 3 0 L 2.4 3 L -2.4 3 Z" fill="var(--earth-600)" />'
+            f'<line x1="0" y1="0" x2="0" y2="-7" stroke="var(--leaf-500)" stroke-width="0.4" />'
+            f'<ellipse cx="-2" cy="-3" rx="1.8" ry="1" fill="var(--leaf-300)" transform="rotate(-20 -2 -3)" />'
+            f'<ellipse cx="2.3" cy="-4.5" rx="1.8" ry="1" fill="var(--leaf-400)" transform="rotate(20 2.3 -4.5)" />'
+            f'<ellipse cx="-1.5" cy="-6.5" rx="1.5" ry="0.9" fill="var(--leaf-300)" transform="rotate(-30 -1.5 -6.5)" />'
+            f'<ellipse cx="0" cy="-7.5" rx="0.7" ry="1.2" fill="var(--leaf-500)" /></svg>'
+        )
+
+    def _pencil():
+        return (
+            f'<svg viewBox="-7 -2 14 4" width="22" height="8">'
+            f'<rect x="-6" y="-1" width="9" height="2" fill="var(--pollen-400)" stroke="{s}" stroke-width="0.3" />'
+            f'<polygon points="3,-1 5,0 3,1" fill="#d8c08a" stroke="{s}" stroke-width="0.3" />'
+            f'<rect x="-6" y="-1" width="1.5" height="2" fill="var(--sev-3)" stroke="{s}" stroke-width="0.3" /></svg>'
+        )
+
+    def _screwdriver():
+        return (
+            f'<svg viewBox="-8 -3 16 6" width="28" height="10">'
+            f'<rect x="-7" y="-1.2" width="6" height="2.4" rx="0.4" fill="var(--sev-3)" stroke="{s}" stroke-width="0.3" />'
+            f'<rect x="-1" y="-0.4" width="6" height="0.8" fill="var(--ink-soft)" />'
+            f'<polygon points="5,-0.4 6.5,0 5,0.4" fill="var(--ink-soft)" /></svg>'
+        )
+
+    def _pegholes():
+        dots = "".join(
+            f'<circle cx="{x}" cy="-6" r="0.5" fill="rgba(60,50,40,0.25)" />'
+            for x in [-4, -1.5, 1, 3.5]
+        )
+        return f'<svg viewBox="-6 -8 12 4" width="18" height="6">{dots}</svg>'
+
+    item_map = {
+        "lamp": _lamp, "mug": _mug, "notebook": _notebook,
+        "paperclip": _paperclip, "sticky": _sticky, "screws": _screws,
+        "tape": _tape, "plant": _plant, "pencil": _pencil,
+        "screwdriver": _screwdriver, "pegholes": _pegholes,
+    }
+
+    items = [
+        (5,  "lamp",        False),
+        (12, "pegholes",    True),
+        (19, "screwdriver", False),
+        (24, "pegholes",    True),
+        (30, "mug",         False),
+        (39, "notebook",    False),
+        (47, "paperclip",   False),
+        (53, "sticky",      False),
+        (62, "pegholes",    True),
+        (68, "screws",      False),
+        (75, "tape",        False),
+        (83, "plant",       False),
+        (92, "pencil",      False),
+    ]
+
+    # Pegboard dot grid
+    peg_rows = int(peg_h / 6)
+    peg_cols = 40
+    peg_dots = "".join(
+        f'<circle cx="{5 + i * 5}" cy="{6 + j * 6}" r="0.4" fill="rgba(60,50,40,0.4)" />'
+        for i in range(peg_cols) for j in range(peg_rows)
+    )
+    pegboard_svg = (
+        f'<svg width="100%" height="{peg_h}" viewBox="0 0 200 {peg_h}" preserveAspectRatio="none" '
+        f'style="position:absolute;top:0;left:0;opacity:0.35" aria-hidden="true">{peg_dots}</svg>'
+    )
+
+    item_divs = ""
+    for x_pct, el, is_peg in items:
+        bottom_px = int(h * 0.55) if is_peg else int(h * 0.18)
+        svg = item_map[el]()
+        item_divs += (
+            f'<div style="position:absolute;left:{x_pct}%;bottom:{bottom_px}px;transform:translateX(-50%)">'
+            f'{svg}</div>'
+        )
+
+    coffee_ring_top = int(h * 0.68)
+
+    return (
+        f'<div style="position:relative;height:{h}px;overflow:hidden;border-radius:12px 12px 0 0;'
+        f'background:linear-gradient(180deg,#f0e3c2 0%,#e5d4a8 65%,#d4be86 65%,#c9b075 100%)">'
+        f'{pegboard_svg}'
+        # desk edge lines
+        f'<div style="position:absolute;left:0;right:0;top:{desk_y}px;height:1px;background:var(--earth-600);opacity:0.4"></div>'
+        f'<div style="position:absolute;left:0;right:0;top:{desk_y + 2}px;height:1px;background:var(--earth-400);opacity:0.3"></div>'
+        # lamp glow
+        f'<div style="position:absolute;left:1%;top:0;width:16%;height:100%;'
+        f'background:radial-gradient(ellipse at 30% 50%,rgba(241,185,74,0.35),transparent 60%)"></div>'
+        # coffee ring
+        f'<div style="position:absolute;left:31%;top:{coffee_ring_top}px;width:24px;height:6px;'
+        f'border-radius:50%;border:1px solid rgba(110,76,40,0.25);opacity:0.6"></div>'
+        f'{item_divs}'
+        f'</div>'
     )
 
 
@@ -776,7 +943,7 @@ def render_workshop(clusters: List[Dict]) -> None:
             f'</div>'
         )
 
-    scene = _meadow_scene_svg(w=900, h=110, seed=sum(ord(c) for c in "workshop"))
+    scene = _workshop_scene_html(h=110)
     st.markdown(
         f"""
         <section class="workshop-wrap">
@@ -1275,10 +1442,74 @@ def render_host_view(store, run_id: str, host_id: str, fleet: Dict) -> None:
 # ─────────────────────────────────────────────────────────
 
 def render_validation(store, run_id: str) -> None:
+    summary: Dict = {}
+    summary_key = f"{run_id}/validation_summary.json"
+    if store.exists(summary_key):
+        try:
+            summary = json.loads(store.read_text(summary_key))
+        except Exception:
+            pass
+
+    if summary:
+        precision = summary.get("incident_type_precision")
+        recall    = summary.get("incident_type_recall")
+        ranking   = summary.get("ranking_score")
+        schema_errors = summary.get("schema_errors", [])
+        cluster_ok    = summary.get("cluster_detected", False)
+        warnings      = summary.get("scenario_warnings", [])
+
+        def _card(label: str, value: str, sub: str, ok: bool | None) -> str:
+            if ok is True:
+                badge_color = "var(--leaf-400)"
+                badge = "✓ pass"
+            elif ok is False:
+                badge_color = "var(--sev-3)"
+                badge = "✗ fail"
+            else:
+                badge_color = "var(--ink-faint)"
+                badge = "—"
+            return (
+                f'<div style="flex:1;min-width:140px;background:var(--paper);border:1px solid var(--leaf-50,#eef2e8);'
+                f'border-radius:12px;padding:18px 20px">'
+                f'<div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:6px">{label}</div>'
+                f'<div style="font-size:32px;font-family:var(--font-display);font-weight:500;color:var(--ink);line-height:1">{value}</div>'
+                f'<div style="font-size:11px;color:var(--ink-faint);margin-top:4px">{sub}</div>'
+                f'<div style="margin-top:10px;font-size:11px;font-weight:600;color:{badge_color}">{badge}</div>'
+                f'</div>'
+            )
+
+        p_ok = precision >= 0.8 if precision is not None else None
+        r_ok = recall    >= 0.8 if recall    is not None else None
+        k_ok = ranking   >= 0.6 if ranking   is not None else None
+        s_ok = len(schema_errors) == 0
+
+        cards_html = (
+            f'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:24px">'
+            + _card("Precision",    f"{precision:.0%}" if precision is not None else "—", "incident type match", p_ok)
+            + _card("Recall",       f"{recall:.0%}"    if recall    is not None else "—", "types detected",      r_ok)
+            + _card("Ranking",      f"{ranking:.0%}"   if ranking   is not None else "—", "host hit rate",       k_ok)
+            + _card("Schema errors", str(len(schema_errors)),                              "validation errors",   s_ok)
+            + f'</div>'
+        )
+        st.markdown(cards_html, unsafe_allow_html=True)
+
+        if cluster_ok is not None:
+            dot = "var(--leaf-400)" if cluster_ok else "var(--sev-3)"
+            label = "Cluster detected" if cluster_ok else "No cluster detected"
+            st.markdown(
+                f'<p style="font-size:13px;color:var(--ink-faint);margin:0 0 12px">'
+                f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+                f'background:{dot};margin-right:6px;vertical-align:middle"></span>{label}</p>',
+                unsafe_allow_html=True,
+            )
+        if warnings:
+            st.warning("Scenario warnings: " + " · ".join(warnings))
+
     report_key = f"{run_id}/validation_report.md"
     if store.exists(report_key):
-        st.markdown(store.read_text(report_key))
-    else:
+        with st.expander("Full validation report", expanded=not bool(summary)):
+            st.markdown(store.read_text(report_key))
+    elif not summary:
         st.info("No validation report found for this run.")
 
 
@@ -1444,6 +1675,14 @@ def main() -> None:
     )
     inject_css()
 
+    # Dark mode — set/remove data-mode="dark" on <html> via iframe JS
+    dark = st.session_state.get("dark_mode", False)
+    _dm_js = 'setAttribute("data-mode","dark")' if dark else 'removeAttribute("data-mode")'
+    components.html(
+        f"<script>window.parent.document.documentElement.{_dm_js}</script>",
+        height=0,
+    )
+
     # Handle regeneration before rendering anything else
     if st.session_state.get("_regen"):
         del st.session_state["_regen"]
@@ -1474,6 +1713,8 @@ def main() -> None:
             horizontal=True,
             help="Meadow: clusters as plants. Workshop: clusters as computers.",
         )
+        st.divider()
+        st.toggle("🌙 Dark mode", key="dark_mode")
         st.divider()
         regen_icon = "🔄" if _is_workshop() else "🌱"
         if st.button(f"{regen_icon} Regenerate demo data", use_container_width=True):
