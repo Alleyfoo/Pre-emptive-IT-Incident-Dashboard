@@ -1567,6 +1567,7 @@ def render_pipeline(fleet: Dict, store, run_id: str) -> None:
                 "System and Application event logs for the last 24 hours."
             ),
             "code": (
+                "# query event logs\n"
                 "Get-WinEvent -FilterHashtable @{\n"
                 "  LogName   = 'System', 'Application'\n"
                 "  StartTime = (Get-Date).AddHours(-24)\n"
