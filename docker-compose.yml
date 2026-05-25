@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   worker:
     build: .
@@ -16,7 +14,7 @@ services:
   dashboard:
     build: .
     command: >
-      sh -c "streamlit run demos/streamlit_incident_dashboard.py --server.port=${PORT:-8501} --server.address=0.0.0.0"
+      sh -c "streamlit run streamlit_app.py --server.port=${PORT:-8501} --server.address=0.0.0.0"
     environment:
       - ARTIFACTS_ROOT=/artifacts
       - PORT=8501

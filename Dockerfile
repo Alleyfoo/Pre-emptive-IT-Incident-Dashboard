@@ -2,8 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY demos/requirements-demo.txt ./demos/requirements-demo.txt
-RUN pip install --no-cache-dir -r demos/requirements-demo.txt
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt google-cloud-storage
 
 COPY . .
 
@@ -12,4 +12,4 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "streamlit run demos/streamlit_incident_dashboard.py --server.port=${PORT} --server.address=0.0.0.0"]
+CMD ["sh", "-c", "streamlit run streamlit_app.py --server.port=${PORT} --server.address=0.0.0.0"]

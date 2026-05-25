@@ -17,7 +17,8 @@ Every run also writes its results to disk as files (called *artifacts*), so you 
 ## What's in the repo
 
 - `runtime/` — the worker that turns snapshots into incidents.
-- `demos/streamlit_incident_dashboard.py` — the dashboard UI.
+- `streamlit_app.py` — the dashboard UI (three themes: **Broadsheet**, **Meadow**, **Workshop**).
+- `broadsheet.css` / `kevat.css` / `streamlit-overrides.css` — styling for the themes.
 - `tools/` — helpers to generate fake test data and validate output.
 - `collector/snapshot.ps1` — a small Windows script that produces a real snapshot from event logs.
 - `docs/` — deployment guides.
@@ -29,7 +30,7 @@ You need Python 3.11 or newer.
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r demos/requirements-demo.txt
+python -m pip install -r requirements.txt
 ```
 
 Generate some fake data, run the worker on it, and check the output is valid:
@@ -43,8 +44,14 @@ python -m tools.validate --run-id demo
 Open the dashboard:
 
 ```powershell
-streamlit run demos/streamlit_incident_dashboard.py
+streamlit run streamlit_app.py
 ```
+
+The dashboard ships with three interchangeable themes selectable from the sidebar:
+
+- **Broadsheet** — editorial, no metaphor. KPI tiles, sparklines, ranked clusters, recent activity feed. The default.
+- **Meadow** — clusters rendered as plants in a meadow; severity grows the bloom.
+- **Workshop** — clusters rendered as machines in a workshop; severity tilts the monitor.
 
 Results land in `artifacts/<run-id>/` — a fleet summary, per-host timelines and reports, and a status file that tells the dashboard which run to display.
 
@@ -76,7 +83,13 @@ Three options, depending on what you have:
 
 - **Synthetic** — `tools/generate_ticket_scenarios.py` makes fake snapshots for development and demos.
 - **Real snapshots** — drop schema-compliant files into `snapshots/<host_id>/snapshot-<ts>.json` and run the worker in snapshot mode.
-- **Reference collector** — `collector/snapshot.ps1` builds a snapshot from Windows event logs as a starting point for a real agent.
+- **Reference collector** — `collector/snapshot.ps1` builds a snapshot from Windows event logs as a starting point for a real agent. Run it on the target machine:
+
+  ```powershell
+  .\collector\snapshot.ps1 -HostId HOST-123 -OutputPath .\snapshots\HOST-123\snapshot-$((Get-Date).ToString('yyyyMMddHHmm')).json -HoursBack 24
+  ```
+
+  It reads the System and Application event logs for the last `-HoursBack` hours, redacts emails / file paths / IPs, and writes a schema-compliant `snapshot.json`. Schedule it via Task Scheduler to drop files into a folder that's uploaded to your artifacts root.
 
 ## Operational defaults
 

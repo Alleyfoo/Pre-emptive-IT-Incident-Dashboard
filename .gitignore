@@ -216,3 +216,9 @@ artifacts/
 # Demo uploads (do not commit)
 demos/.uploads/
 demos/.tmp/
+
+# IDE / agent local state
+.claude/
+
+# Design working files (not yet curated)
+design/
